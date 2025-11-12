@@ -6,16 +6,16 @@
 #include "i2c.h"
 #include "isp.h"
 
-#define I2C_SDA_PIN           ISP_MISO                     //–ª–∏–Ω–∏—è SDA
-#define I2C_SCL_PIN           ISP_MOSI                     //–ª–∏–Ω–∏—è SCL
-                                                           //–ø–æ—Ä—Ç –≤—Ö–æ–¥–∞
-#define I2C_SDA_PORT_READ     ISP_IN                       //–ø–æ—Ä—Ç –≤—Ö–æ–¥–∞
+#define I2C_SDA_PIN           ISP_MISO                     //´®≠®Ô SDA
+#define I2C_SCL_PIN           ISP_MOSI                     //´®≠®Ô SCL
+                                                           //ØÆ‡‚ ¢ÂÆ§†
+#define I2C_SDA_PORT_READ     ISP_IN                       //ØÆ‡‚ ¢ÂÆ§†
 #define I2C_SCL_PORT_READ     ISP_IN
 
-#define I2C_SDA_PORT_DIR      ISP_DDR                      //–ø–æ—Ä—Ç –Ω–∞–ø—Ä–∞–≤–ª–µ–Ω–∏—è
-#define I2C_SCL_PORT_DIR      ISP_DDR                      //–ø–æ—Ä—Ç –Ω–∞–ø—Ä–∞–≤–ª–µ–Ω–∏—è
-#define I2C_SDA_PORT          ISP_OUT                      //–ø–æ—Ä—Ç –≤—ã—Ö–æ–¥–∞
-#define I2C_SCL_PORT          ISP_OUT                      //–ø–æ—Ä—Ç –≤—ã—Ö–æ–¥–∞
+#define I2C_SDA_PORT_DIR      ISP_DDR                      //ØÆ‡‚ ≠†Ø‡†¢´•≠®Ô
+#define I2C_SCL_PORT_DIR      ISP_DDR                      //ØÆ‡‚ ≠†Ø‡†¢´•≠®Ô
+#define I2C_SDA_PORT          ISP_OUT                      //ØÆ‡‚ ¢ÎÂÆ§†
+#define I2C_SCL_PORT          ISP_OUT                      //ØÆ‡‚ ¢ÎÂÆ§†
 
 #define SET(reg, bit) ((reg) |= (1U << (bit)))
 #define CLR(reg, bit) ((reg) &= ~(1U << (bit)))
@@ -44,7 +44,7 @@
 #define I2C_SDA_VALUE (GETBIT(I2C_SDA_PORT_READ, I2C_SDA_PIN))
 #define I2C_SCL_VALUE (GETBIT(I2C_SCL_PORT_READ, I2C_SCL_PIN))
 
-// –û–ø—Ç–∏–º–∏–∑–∏—Ä–æ–≤–∞–Ω–Ω—ã–µ –∑–∞–¥–µ—Ä–∂–∫–∏
+// éØ‚®¨®ß®‡Æ¢†≠≠Î• ß†§•‡¶™®
 //#define I2C_DELAY_FAST _delay_us(2)
 //#define I2C_DELAY_NORMAL _delay_us(4)
 static inline void i2c_delay_normal(void) { _delay_us(5); }
@@ -88,7 +88,7 @@ void i2c_stop() {
     i2c_delay_normal();
 }
 
-// –û–ø—Ç–∏–º–∏–∑–∏—Ä–æ–≤–∞–Ω–Ω–∞—è –æ—Ç–ø—Ä–∞–≤–∫–∞ –±–∞–π—Ç–∞
+// éØ‚®¨®ß®‡Æ¢†≠≠†Ô Æ‚Ø‡†¢™† °†©‚†
 unsigned char i2c_send_byte(unsigned char byte) {
     for(unsigned char i = 0; i < 8; i++) {
         I2C_SCL_LOW();
@@ -106,7 +106,7 @@ unsigned char i2c_send_byte(unsigned char byte) {
         byte <<= 1;
     }
     
-    // –ß—Ç–µ–Ω–∏–µ ACK
+    // ó‚•≠®• ACK
     I2C_SCL_LOW();
     I2C_SDA_HIGH();
     i2c_delay_fast();
@@ -119,7 +119,7 @@ unsigned char i2c_send_byte(unsigned char byte) {
     return ack;
 }
 
-// –û–ø—Ç–∏–º–∏–∑–∏—Ä–æ–≤–∞–Ω–Ω–æ–µ —á—Ç–µ–Ω–∏–µ –±–∞–π—Ç–∞
+// éØ‚®¨®ß®‡Æ¢†≠≠Æ• Á‚•≠®• °†©‚†
 uint8_t i2c_read_byte(uint8_t ack) {
     uint8_t result = 0;
     I2C_SDA_HIGH();

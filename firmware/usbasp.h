@@ -5,7 +5,7 @@
  * Description....: Definitions and macros for usbasp
  * Licence........: GNU GPL v2 (see Readme.txt)
  * Creation Date..: 2009-02-28
- * Last change....: 2025-11-11
+ * Last change....: 2009-02-28
  */
 
 #ifndef USBASP_H_
@@ -22,14 +22,13 @@
 #define USBASP_FUNC_WRITEEEPROM 	8
 #define USBASP_FUNC_SETLONGADDRESS 	9
 #define USBASP_FUNC_SETISPSCK 		10
-
 #define USBASP_FUNC_TPI_CONNECT      	11
 #define USBASP_FUNC_TPI_DISCONNECT   	12
 #define USBASP_FUNC_TPI_RAWREAD      	13
 #define USBASP_FUNC_TPI_RAWWRITE     	14
 #define USBASP_FUNC_TPI_READBLOCK    	15
 #define USBASP_FUNC_TPI_WRITEBLOCK   	16
-#define USBASP_FUNC_GETISPSCK        	20
+#define USBASP_FUNC_GETISPSCK         	20
 
 #define USBASP_FUNC_SPI_CONNECT		50
 #define USBASP_FUNC_SPI_READ  		51
@@ -53,28 +52,26 @@
 #define USBASP_FUNC_GETCAPABILITIES 	127
 
 /* USBASP capabilities */
-// Р‘Р°Р№С‚ 0: РћСЃРЅРѕРІРЅС‹Рµ РІРѕР·РјРѕР¶РЅРѕСЃС‚Рё
-#define USBASP_CAP_0_TPI        0x01  // РџРѕРґРґРµСЂР¶РєР° TPI РёРЅС‚РµСЂС„РµР№СЃР°
-//#define USBASP_CAP_0_PDI        0x02  // РџРѕРґРґРµСЂР¶РєР° PDI РёРЅС‚РµСЂС„РµР№СЃР°
-//#define USBASP_CAP_0_SPI25      0x04  // РџРѕРґРґРµСЂР¶РєР° SPI РґР»СЏ 25xx РїР°РјСЏС‚Рё
-#define USBASP_CAP_0_I2C        0x08  // РџРѕРґРґРµСЂР¶РєР° I2C РґР»СЏ 24xx РїР°РјСЏС‚Рё
-#define USBASP_CAP_0_MW         0x10  // РџРѕРґРґРµСЂР¶РєР° Microwire РґР»СЏ 93xx РїР°РјСЏС‚Рё
+// Байт 0: Основные возможности
+#define USBASP_CAP_0_TPI        0x01  // Поддержка TPI интерфейса
+//#define USBASP_CAP_0_PDI        0x02  // Поддержка PDI интерфейса
+//#define USBASP_CAP_0_SPI25      0x04  // Поддержка SPI для 25xx памяти
+#define USBASP_CAP_0_I2C        0x08  // Поддержка I2C для 24xx памяти
+#define USBASP_CAP_0_MW         0x10  // Поддержка Microwire для 93xx памяти
+//#define USBASP_CAP_0_SWD        0x20  // Поддержка SWD для ARM
+//#define USBASP_CAP_0_JTAG       0x40  // Поддержка JTAG
 
-//#define USBASP_CAP_0_SWD        0x20  // РџРѕРґРґРµСЂР¶РєР° SWD РґР»СЏ ARM
-//#define USBASP_CAP_0_JTAG       0x40  // РџРѕРґРґРµСЂР¶РєР° JTAG
+// Байт 1: Дополнительные возможности
+#define USBASP_CAP_1_SCK_AUTO   0x01  // Автоматическое определение SCK
+//#define USBASP_CAP_1_VTARGET    0x02  // Измерение напряжения целевого устройства
+//#define USBASP_CAP_1_FW_UPDATE  0x04  // Возможность обновления прошивки
+#define USBASP_CAP_1_HW_SCK   	0x80   /* бит 7 – аппаратный SCK */
 
-// Р‘Р°Р№С‚ 1: Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Рµ РІРѕР·РјРѕР¶РЅРѕСЃС‚Рё
-#define USBASP_CAP_1_SCK_AUTO   0x01  // РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРѕРµ РѕРїСЂРµРґРµР»РµРЅРёРµ SCK
-//#define USBASP_CAP_1_VTARGET    0x02  // РР·РјРµСЂРµРЅРёРµ РЅР°РїСЂСЏР¶РµРЅРёСЏ С†РµР»РµРІРѕРіРѕ СѓСЃС‚СЂРѕР№СЃС‚РІР°
-//#define USBASP_CAP_1_FW_UPDATE  0x04  // Р’РѕР·РјРѕР¶РЅРѕСЃС‚СЊ РѕР±РЅРѕРІР»РµРЅРёСЏ РїСЂРѕС€РёРІРєРё
-#define USBASP_CAP_1_HW_SCK   	0x80   /* Р±РёС‚ 7 вЂ“ Р°РїРїР°СЂР°С‚РЅС‹Р№ SCK */
-
-// Р‘Р°Р№С‚ 3: Р’РѕР·РјРѕР¶РЅРѕСЃС‚Рё СЂР°Р±РѕС‚С‹ СЃ РїР°РјСЏС‚СЊСЋ
-#define USBASP_CAP_3_FLASH      0x01  // РџРѕРґРґРµСЂР¶РєР° Flash РїР°РјСЏС‚Рё
-#define USBASP_CAP_3_EEPROM     0x02  // РџРѕРґРґРµСЂР¶РєР° EEPROM РїР°РјСЏС‚Рё
-#define USBASP_CAP_3_FUSES      0x04  // РџРѕРґРґРµСЂР¶РєР° С‡С‚РµРЅРёСЏ/Р·Р°РїРёСЃРё fuse-Р±РёС‚РѕРІ
-#define USBASP_CAP_3_LOCKBITS   0x08  // РџРѕРґРґРµСЂР¶РєР° С‡С‚РµРЅРёСЏ/Р·Р°РїРёСЃРё lock-Р±РёС‚РѕРІ
-#define USBASP_CAP_3_EXTENDED_ADDR 0x80
+// Байт 3: Возможности работы с памятью
+#define USBASP_CAP_3_FLASH      0x01  // Поддержка Flash памяти
+#define USBASP_CAP_3_EEPROM     0x02  // Поддержка EEPROM памяти
+#define USBASP_CAP_3_FUSES      0x04  // Поддержка чтения/записи fuse-битов
+#define USBASP_CAP_3_LOCKBITS   0x08  // Поддержка чтения/записи lock-битов
 
 /* programming state */
 #define PROG_STATE_IDLE         0
@@ -113,11 +110,10 @@
 #define USBASP_ISP_SCK_750    	11  /* 750 kHz   */
 #define USBASP_ISP_SCK_1500   	12  /* 1.5 MHz   */
 #define USBASP_ISP_SCK_3000   	13  /* 3 MHz   */
-#define USBASP_ISP_SCK_6000   	14  /* 6 MHz   */
 
 /* macros for gpio functions */
-#define ledRedOff()    PORTC |=  (1 << PC0)   // Р°РЅРѕРґ С‡РµСЂРµР· СЂРµР·РёСЃС‚РѕСЂ Рє +5 В¬
-#define ledRedOn()     PORTC &= ~(1 << PC0)   // РєР°С‚РѕРґ Рє GND > СЃРІРµС‚РѕРґРёРѕРґ РіРѕСЂРёС‚
+#define ledRedOff()    PORTC |=  (1 << PC0)   // анод через резистор к +5 ¬
+#define ledRedOn()     PORTC &= ~(1 << PC0)   // катод к GND > светодиод горит
 
 #define ledGreenOff()  PORTC |=  (1 << PC1)
 #define ledGreenOn()   PORTC &= ~(1 << PC1)

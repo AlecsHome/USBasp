@@ -10,7 +10,7 @@
 #include "isp.h"
 #include "microwire.h"
 
-#define ORG_OFFSET 6   /* Microwire РѕСЂРіР°РЅРёР·Р°С†РёСЏ = РЅР°Р№РґРµРЅРЅС‹Р№_0 + 6 */
+#define ORG_OFFSET 6   /* Microwire организация = найденный_0 + 6 */
 
 /* ---------- local helpers ---------- */
 static inline void mw_clk_hi(void)   { ISP_OUT |=  (1 << ISP_SCK); }
@@ -35,7 +35,7 @@ void mwBegin(void)
 
 void mwStart(void)
 {
-    // Р’РµСЂРЅСѓС‚СЊ РѕСЂРёРіРёРЅР°Р»СЊРЅСѓСЋ СЂРµР°Р»РёР·Р°С†РёСЋ Р±РµР· РїР°СЂР°РјРµС‚СЂР°
+    // Вернуть оригинальную реализацию без параметра
     ISP_OUT &= ~(1 << ISP_RST);  // CS = 0
     ISP_OUT &= ~(1 << ISP_SCK);  // CLK = 0
     ispDelay();
@@ -72,7 +72,7 @@ uint8_t mwSendData(uint8_t data, uint8_t bits)
         ispDelay();          /* high time    */
         mw_clk_lo();         /* clock low for next bit */
     }
-    return 0; // Р’РѕР·РІСЂР°С‰Р°РµРј 0 РІ СЃР»СѓС‡Р°Рµ СѓСЃРїРµС…Р°
+    return 0; // Возвращаем 0 в случае успеха
 }
 
 uint8_t mwReadByte(void)
@@ -116,7 +116,7 @@ uint8_t mwGetAdrLen(void)
         mw_clk_hi();
         ispDelay();
         
-        if (!mw_so_read()) {   /* РїРµСЂРІС‹Р№ 0 РЅР° SO > РґР»РёРЅР° = i + 6 */
+        if (!mw_so_read()) {   /* первый 0 на SO > длина = i + 6 */
             len = i + ORG_OFFSET;
             mw_clk_lo();  /* set clock low before break */
             break;
