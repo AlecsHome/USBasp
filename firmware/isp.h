@@ -24,14 +24,24 @@
 #define ISP_MISO  PB4
 #define ISP_SCK   PB5
 
+#define FLASH_MAX_BYTES   (512UL*1024)
+#define EXTADDR_BLOCK     (0x20000UL)
+#define EXTADDR_BLOCKS    (FLASH_MAX_BYTES / EXTADDR_BLOCK)
+
+#define CS_LOW()	ISP_OUT &= ~(1 << ISP_RST); /* RST low */
+#define CS_HI()		ISP_OUT |= (1 << ISP_RST); /* RST high */
+
+extern uchar (*ispTransmit)(uchar);
+
 /* Prepare connection to target device */
 void ispConnect();
+
+void isp25Connect();
 
 /* Close connection to target device */
 void ispDisconnect();
 
-/* Prepare to listen to target device */
-void spiInit();
+void ispDelay();
 
 /* read an write a byte from isp using software (slow) */
 uchar ispTransmit_sw(uchar send_byte);
@@ -46,12 +56,12 @@ uchar ispEnterProgrammingMode();
 uchar ispReadEEPROM(unsigned int address);
 
 /* write byte to flash at given address */
-uchar ispWriteFlash(unsigned long address, uchar data, uchar pollmode);
+uchar ispWriteFlash(uint32_t address, uchar data, uchar pollmode);
 
-uchar ispFlushPage(unsigned long address, uchar pollvalue);
+uchar ispFlushPage(uint32_t address);
 
 /* read byte from flash at given address */
-uchar ispReadFlash(unsigned long address);
+uchar ispReadFlash(uint32_t address);
 
 /* write byte to eeprom at given address */
 uchar ispWriteEEPROM(unsigned int address, uchar data);
@@ -60,9 +70,13 @@ uchar ispWriteEEPROM(unsigned int address, uchar data);
 uchar (*ispTransmit)(uchar);
 
 /* set SCK speed. call before ispConnect! */
-void ispSetSCKOption(uchar sckoption);
+//void ispSetSCKOption(uchar sckoption);
+void ispSetSCKOption(uchar option);
 
 /* load extended address byte */
-void ispLoadExtendedAddressByte(unsigned long address);
+void ispLoadExtendedAddressByte(uint32_t address);
+
+/* */
+void spibusy(void);
 
 #endif /* __isp_h_included__ */
