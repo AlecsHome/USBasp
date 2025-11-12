@@ -1,14 +1,3 @@
-/*
- * isp.c - part of USBasp
- *
- * Autor..........: Thomas Fischl <tfischl@gmx.de>
- * Description....: Provides functions for communication/programming
- *                  over ISP interface
- * Licence........: GNU GPL v2 (see Readme.txt)
- * Creation Date..: 2005-02-23
- * Last change....: 2010-01-19
- */
-
 #include <avr/io.h>
 #include "isp.h"
 #include "clock.h"
