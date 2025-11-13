@@ -4,19 +4,17 @@
 #   20061120   Hanns-Konrad Unger   help: and TARGET=atmega48 added
 #
 
-# TARGET=atmega8    HFUSE=0xc9  LFUSE=0xef
-# TARGET=atmega48   HFUSE=0xdd  LFUSE=0xff
-# TARGET=at90s2313
-
 # crystal frequency
 #F_CPU=12000000UL
 #F_CPU=16000000UL
 
-TARGET=atmega328p
-CFLAGS += -DF_CPU=16000000UL
-HFUSE=0xde
-LFUSE=0xff
-EFUSE=0x05
+# TARGET=atmega8    HFUSE=0xc9  LFUSE=0xef
+# TARGET=atmega48   HFUSE=0xdd  LFUSE=0xff
+# TARGET=at90s2313
+TARGET=atmega8
+CFLAGS += -DF_CPU=12000000UL
+HFUSE=0xc9
+LFUSE=0xef
 
 # Добавьте в начало Makefile размеры памяти для разных микроконтроллеров
 ifeq ($(TARGET), atmega8)
@@ -33,13 +31,15 @@ else
   EEPROM_SIZE = 512
 endif
 
+
+
 # ISP=bsd      PORT=/dev/parport0
 # ISP=ponyser  PORT=/dev/ttyS1
 # ISP=stk500   PORT=/dev/ttyS1
 # ISP=usbasp   PORT=/dev/usb/ttyUSB0
 # ISP=stk500v2 PORT=/dev/ttyUSB0
-ISP=usbasp
-PORT=/dev/usb/ttyUSB0
+#PORT=/dev/usb/ttyUSB0
+PORT=usb
 
 help:
 	@echo "Usage: make                same as make help"
@@ -59,11 +59,13 @@ help:
 	@echo "       PORT=${PORT}"
 
 SRC += tpi.S
-#COMPILE = avr-gcc -Wall -Wextra -Os -std=gnu99 -Iusbdrv -I. -mmcu=$(TARGET) # -DDEBUG_LEVEL=2
+#CFLAGS += -fexec-charset=CP866 -finput-charset=UTF-8
+
+#COMPILE = avr-gcc -Wall -Wextra -Os -flto -std=gnu99 -Iusbdrv -I. -mmcu=$(TARGET) # -DDEBUG_LEVEL=2
 COMPILE = avr-gcc -Wall -Wextra -Os -std=gnu99 -Iusbdrv -I. -mmcu=$(TARGET) -ffunction-sections -fdata-sections -Wl,--gc-sections
 COMPILE += -fno-jump-tables -fno-tree-switch-conversion -funsigned-char -fpack-struct
 
-OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o usbdrv/oddebug.o isp.o clock.o tpi.o main.o i2c.o microwire.o #spi25.o 
+OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o usbdrv/oddebug.o isp.o clock.o tpi.o main.o i2c.o microwire.o 
 
 .c.o:
 	$(COMPILE) -c $< -o $@
@@ -84,11 +86,8 @@ clean:
 
 # file targets:
 main.bin:	$(OBJECTS)
-	$(COMPILE) -o main.bin $(OBJECTS) -Wl,-Map,main.map
+	$(COMPILE) -o main.bin $(OBJECTS) -Wl,-Map,main.map -Wl,--relax
 
-main.hex:	main.bin
-	rm -f main.hex main.eep.hex
-	avr-objcopy -j .text -j .data -O ihex main.bin main.hex
 main.hex:	main.bin
 	rm -f main.hex main.eep.hex
 	avr-objcopy -j .text -j .data -O ihex main.bin main.hex
@@ -150,7 +149,6 @@ main.hex:	main.bin
 	@rm -f _size.tmp
 	@echo "----------------------------------"
 
-
 #	./checksize main.bin
 # do the checksize script as our last action to allow successful compilation
 # on Windows with WinAVR where the Unix commands will fail.
@@ -161,11 +159,11 @@ disasm:	main.bin
 cpp:
 	$(COMPILE) -E main.c
 
-flash:
+flash:   main.hex
 	avrdude -c ${ISP} -p ${TARGET} -P ${PORT} -U flash:w:main.hex
 
 fuses:
-	avrdude -c ${ISP} -p ${TARGET} -P ${PORT} -u -U hfuse:w:$(HFUSE):m -U lfuse:w:$(LFUSE):m -U efuse:w:$(EFUSE):m
+	avrdude -c ${ISP} -p ${TARGET} -P ${PORT} -u -U hfuse:w:$(HFUSE):m -U lfuse:w:$(LFUSE):m
 
 avrdude:
 	avrdude -c ${ISP} -p ${TARGET} -P ${PORT} -v

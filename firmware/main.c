@@ -1,19 +1,4 @@
-﻿/*
- * USBasp - USB in-circuit programmer for Atmel AVR controllers
- *
- * Thomas Fischl <tfischl@gmx.de>
- *
- * License........: GNU GPL v2 (see Readme.txt)
- * Target.........: ATMega8 at 12 MHz
- * Creation Date..: 2005-02-20
- * Last change....: 2009-02-28
- *
- * PC2 SCK speed option.
- * GND  -> slow (8khz SCK),
- * open -> software set speed (default is 375kHz SCK)
- */
-
-#include <avr/io.h>
+﻿#include <avr/io.h>
 #include <avr/interrupt.h>
 #include <avr/pgmspace.h>
 
@@ -258,7 +243,6 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 	} else if (data[1] == USBASP_FUNC_DISCONNECT) {
 		ispDisconnect();
 		ledGreenOff();
-		ledRedOff();
 
 	} else if (data[1] == USBASP_FUNC_TRANSMIT) {
 		replyBuffer[0] = ispTransmit(data[2]);
@@ -276,14 +260,11 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
     		len = USB_NO_MSG;
 
 	} else if (data[1] == USBASP_FUNC_ENABLEPROG) {
-
-		replyBuffer[0] = ispEnterProgrammingMode();
-		
+        	replyBuffer[0] = ispEnterProgrammingMode();
 		len = 1;
 
 	} else if (data[1] == USBASP_FUNC_WRITEFLASH) {
-
-		if (!prog_address_newmode)
+        	if (!prog_address_newmode)
 		prog_address = (data[3] << 8) | data[2];
 
 		prog_pagesize = data[4];
@@ -300,8 +281,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 
 		if (!prog_address_newmode)
 		prog_address = (data[3] << 8) | data[2];
-
-		prog_pagesize = 0;
+        	prog_pagesize = 0;
 		prog_blockflags = 0;
 		prog_nbytes = (data[7] << 8) | data[6];
 		prog_state = PROG_STATE_WRITEEEPROM;
@@ -367,9 +347,9 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 	
 	} else if (data[1] == USBASP_FUNC_TPI_RAWWRITE) {
 		tpi_send_byte(data[2]);
-		replyBuffer[0] = 0;          // <-- обязательно!
+	        replyBuffer[0] = 0;          // <-- обязательно!
     		len = 1;
-	
+
 	} else if (data[1] == USBASP_FUNC_TPI_READBLOCK) {
     		setupTransfer(data, PROG_STATE_TPI_READ);
     		len = USB_NO_MSG;
@@ -408,7 +388,7 @@ uchar usbFunctionRead(uchar *data, uchar len)
     len = MIN(len, prog_nbytes);
     ledGreenOn();
 
-    /* TPI – быстро отдельно */
+    /*---------- TPI ---------- */
     if (prog_state == PROG_STATE_TPI_READ) {
         tpi_read_block(prog_address, data, len);
         prog_address += len;
@@ -419,7 +399,7 @@ uchar usbFunctionRead(uchar *data, uchar len)
         goto exit_success;
     }
 
-    /* SPI – без буфера */
+    /*---------- SPI ---------- */
     if (prog_state == PROG_STATE_SPI_READ) {
         for (uint8_t i = 0; i < len; i++) {
             data[i] = ispTransmit(0);
@@ -437,7 +417,7 @@ uchar usbFunctionRead(uchar *data, uchar len)
     }
 
     /* ---------- I2C – без буфера ---------- */
-    /* В usbFunctionRead - расширенная обработка I2C */
+    /* usbFunctionRead - расширенная обработка I2C */
 	if (prog_state == PROG_STATE_I2C_READ) {
     	  if (i2c_eeprom_mode) {
           // EEPROM режим - уже установлен указатель, просто читаем данные
@@ -461,7 +441,7 @@ uchar usbFunctionRead(uchar *data, uchar len)
        goto exit_success;
      }
 
-    /* MW – без буфера */
+    /* ---------- MW – без буфера ----------*/
     if (prog_state == PROG_STATE_MW_READ) {
         for (uint8_t i = 0; i < len; i++) {
             data[i] = mwReadByte();
@@ -547,7 +527,7 @@ uchar usbFunctionWrite(uchar *data, uchar len)
     /* Оптимизация: определяем реальную длину */
     len = MIN(len, prog_nbytes);
 
-    /* TPI – быстро отдельно */
+    /* ---------- TPI ---------- */
     if (prog_state == PROG_STATE_TPI_WRITE) {
         tpi_write_block(prog_address, data, len);
         prog_address += len;
@@ -559,7 +539,7 @@ uchar usbFunctionWrite(uchar *data, uchar len)
         goto exit;
     }
 
-    /* SPI – без буфера */
+    /* ---------- SPI ---------- */
     if (prog_state == PROG_STATE_SPI_WRITE) {
         for (i = 0; i < len; i++) {
             ispTransmit(data[i]);
@@ -666,9 +646,9 @@ uchar usbFunctionWrite(uchar *data, uchar len)
      goto exit;
   }
 
-    	/* ---------- MW – без буфера ----------*/
-    	if (prog_state == PROG_STATE_MW_WRITE) {
-     	  for (i = 0; i < len; i++) {
+    /* ---------- MW – без буфера ----------*/
+    if (prog_state == PROG_STATE_MW_WRITE) {
+     	for (i = 0; i < len; i++) {
            if (mw_bitnum > 0) {
             uint8_t bits = (mw_bitnum < 8) ? mw_bitnum : 8;
             if (mwSendData(data[i], bits) != 0) {
@@ -733,7 +713,7 @@ uchar usbFunctionWrite(uchar *data, uchar len)
     	 goto exit;
 	}   
 
-     /* Неизвестное состояние */
+     /* --- Неизвестное состояние --- */
      retVal = 0xFF;
 
   exit:
@@ -742,69 +722,51 @@ uchar usbFunctionWrite(uchar *data, uchar len)
     return retVal;
 }
 
-void init_frequency_generator(void) {
-    // Сброс таймера1
-    TCCR1A = 0;
-    TCCR1B = 0;
-    
-       // Установить режим CTC
-    TCCR1B |= (1 << WGM12);
-    
-    // Установить предделитель на 8
-    TCCR1B |= (1 << CS11);
-    
-    // Установить значение для сравнения
-    // Для 1 МГц с 16 МГц тактовой частотой: 16 МГц / 8 / 2 = 1000
-    OCR1A = 1000; 
-    
-    // Включить выход на OC1A (PB1)
-    TCCR1A |= (1 << COM1A0);
-
-}
-
 int main(void) {
+
     /* no pullups on USB and ISP pins */
     PORTD = 0;
+    PORTB = 0;
     
-    /* --- USB D+ (PD2) и D- (PD7) --- */
-    PORTD &= ~((1 << PD2) | (1 << PD7)); // D+ и D- = 0
-    DDRD  |= (1 << PD2) | (1 << PD7);    // выходы, low
-    _delay_ms(25);;                       // >10 мс (USB 2.0 spec)
-    DDRD  &= ~((1 << PD2) | (1 << PD7)); // возвращаем во входы
-
-    // Теперь настраиваем порт B: все входы, кроме PB1
-    DDRB = 0;   // все пины порта B как входы
-    DDRB |= (1 << PB1);   // PB1 как выход
+    /* Output SE0 for USB reset */
+    /* aleh: i.e. both D+ and D- should be low. */
+    PORTB &= ~((1 << PB1) | (1 << PB0)); // D+ и D- = 0
+    DDRB |= (1 << PB1) | (1 << PB0); 	 // выходы, low	
+    /* aleh: there was a delay loop here instead which probably would still work, I've put this when was debugging. */
+    _delay_ms(64);           // >10 мс (USB 2.0 spec)
+    DDRB = 0;                // возвращаем во входы
 
     /* Инициализация порта C: светодиоды и подтяжки для входов */
     DDRC = (1 << PC0) | (1 << PC1);  // Только PC0 и PC1 как выходы
     DDRC &= ~(1 << PC2);
+    //   PORTC = (1 << PC0) | (1 << PC1); // Светодиоды выключены (общий анод)
     // Включим подтяжки для остальных пинов, включая PC2
     PORTC |= (1 << PC2) | (1 << PC3) | (1 << PC4) | (1 << PC5);
    
     /* ----------- индикация ----------- */
+
     ledRedOn();
-     _delay_ms(250);
+    _delay_ms(128);
     ledRedOff();
     ledGreenOn();  
-    _delay_ms(250);
+    _delay_ms(128);  
     ledGreenOff();
+    ledRedOn();
    
     /* ----------- USB ----------- */
+
     /* init timer */
     clockInit();
-
-    /* Инициализация генератора частоты */
-    init_frequency_generator();
-
+    
     /* main event loop */
     usbInit();
 
     sei();
     
     for (;;) {
+
         usbPoll();
+
     }
     return 0;
 }
-

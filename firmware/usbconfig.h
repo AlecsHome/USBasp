@@ -24,26 +24,32 @@ section at the end of this file).
 */
 
 /* ---------------------------- Hardware Config ---------------------------- */
-// Для Atmega328 поменял порт и выводы на 2 и 7
-#define USB_CFG_IOPORTNAME      D
+
+#define USB_CFG_IOPORTNAME      B
 /* This is the port where the USB bus is connected. When you configure it to
  * "B", the registers PORTB, PINB and DDRB will be used.
  */
-#define USB_CFG_DMINUS_BIT      7
+#define USB_CFG_DMINUS_BIT      0
 /* This is the bit number in USB_CFG_IOPORT where the USB D- line is connected.
  * This may be any bit in the port.
  */
-#define USB_CFG_DPLUS_BIT       2
+#define USB_CFG_DPLUS_BIT       1
 /* This is the bit number in USB_CFG_IOPORT where the USB D+ line is connected.
  * This may be any bit in the port. Please note that D+ must also be connected
- * to interrupt pin INT0!
+ * to interrupt pin INT0! [You can also use other interrupts, see section
+ * "Optional MCU Description" below, or you can connect D- to the interrupt, as
+ * it is required if you use the USB_COUNT_SOF feature. If you use D- for the
+ * interrupt, the USB interrupt will also be triggered at Start-Of-Frame
+ * markers every millisecond.]
  */
-#define USB_CFG_CLOCK_KHZ 16000
-/* Clock rate of the AVR in MHz. Legal values are 12000, 16000 or 16500.
- * The 16.5 MHz version of the code requires no crystal, it tolerates +/- 1%
- * deviation from the nominal frequency. All other rates require a precision
- * of 2000 ppm and thus a crystal!
- * Default if not specified: 12 MHz
+#define USB_CFG_CLOCK_KHZ 12000
+/* Clock rate of the AVR in kHz. Legal values are 12000, 12800, 15000, 16000,
+ * 16500, 18000 and 20000. The 12.8 MHz and 16.5 MHz versions of the code
+ * require no crystal, they tolerate +/- 1% deviation from the nominal
+ * frequency. All other rates require a precision of 2000 ppm and thus a
+ * crystal!
+ * Since F_CPU should be defined to your actual clock rate anyway, you should
+ * not need to modify this setting.
  */
 #define USB_CFG_CHECK_CRC       0
 /* Define this to 1 if you want that the driver checks integrity of incoming
