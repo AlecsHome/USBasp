@@ -51,6 +51,20 @@ static void setupSPIState(uint8_t mode, uint8_t *data) {
     prog_state = mode;
 }
 
+static void setupWriteOperation(uint8_t *data, uint8_t new_state,
+                                uint8_t pagesize, uint8_t flags) {
+    if (!prog_address_newmode)
+        prog_address = (data[3] << 8) | data[2];
+
+    prog_pagesize = pagesize;
+    prog_blockflags = flags;
+    if (flags & PROG_BLOCKFLAG_FIRST)
+        prog_pagecounter = pagesize;
+
+    prog_nbytes = (data[7] << 8) | data[6];
+    prog_state = new_state;
+}
+
 /* -------------------------------------------------------------------------------- */
 
 usbMsgLen_t usbFunctionSetup(uchar data[8]) {
@@ -58,9 +72,16 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 	usbMsgLen_t len = 0;
 	
 	if (data[1] == USBASP_FUNC_CONNECT) {
-
+	        /* Код проверял вывод PC2, на котором в оригинальном программаторе поддерживалась перемычка 
+                «медленный SCK», вместо этого мы устанавливаем максимальную скорость. */
+	        /* set max SCK speed */
+/*        	if ((PINC & (1 << PC2)) == 0) {
+                ispSetSCKOption(USBASP_ISP_SCK_3000);
+        	} else {
+                ispSetSCKOption(prog_sck);
+        	}
+*/
 		/* set SCK speed */
-		
 		ispSetSCKOption(prog_sck);
 		
 		/* set compatibility mode of address delivering */
@@ -264,28 +285,14 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 		len = 1;
 
 	} else if (data[1] == USBASP_FUNC_WRITEFLASH) {
-        	if (!prog_address_newmode)
-		prog_address = (data[3] << 8) | data[2];
-
-		prog_pagesize = data[4];
-		prog_blockflags = data[5] & 0x0F;
-		prog_pagesize += (((unsigned int) data[5] & 0xF0) << 4);
-		if (prog_blockflags & PROG_BLOCKFLAG_FIRST) {
-  		  prog_pagecounter = prog_pagesize;
-		}
-		prog_nbytes = (data[7] << 8) | data[6];
-		prog_state = PROG_STATE_WRITEFLASH;
-		len = USB_NO_MSG; /* multiple out */
+    		uint8_t pagesize = data[4] + (((data[5] & 0xF0) << 4));
+    		uint8_t flags = data[5] & 0x0F;
+    		setupWriteOperation(data, PROG_STATE_WRITEFLASH, pagesize, flags);
+    		len = USB_NO_MSG;
 
 	} else if (data[1] == USBASP_FUNC_WRITEEEPROM) {
-
-		if (!prog_address_newmode)
-		prog_address = (data[3] << 8) | data[2];
-        	prog_pagesize = 0;
-		prog_blockflags = 0;
-		prog_nbytes = (data[7] << 8) | data[6];
-		prog_state = PROG_STATE_WRITEEEPROM;
-		len = USB_NO_MSG; /* multiple out */
+    		setupWriteOperation(data, PROG_STATE_WRITEEEPROM, 0, 0);
+    		len = USB_NO_MSG;
 
 	} else if (data[1] == USBASP_FUNC_SETLONGADDRESS) {
 
