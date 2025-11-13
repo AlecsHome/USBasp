@@ -65,6 +65,14 @@ static void setupWriteOperation(uint8_t *data, uint8_t new_state,
     prog_state = new_state;
 }
 
+static void setupMicrowireOperation(uint8_t *data, uint8_t new_state) {
+    mw_addr = (data[3] << 8) | data[2];
+    mw_bitnum = data[4];
+    mw_opcode = data[5];
+    prog_nbytes = (data[7] << 8) | data[6];
+    prog_state = new_state;
+}
+
 /* -------------------------------------------------------------------------------- */
 
 usbMsgLen_t usbFunctionSetup(uchar data[8]) {
@@ -206,24 +214,12 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 //microwire 93xx ---------------------------------------------------------		
 
 	} else if (data[1] == USBASP_FUNC_MW_WRITE) {
-    		// data[2] - младший байт адреса, data[3] - старший байт адреса
-    		mw_addr = (data[3] << 8) | data[2];
-    		mw_bitnum = data[4];  // количество бит для передачи
-    		mw_opcode = data[5];  // опкод команды
-    
-    		prog_nbytes = (data[7] << 8) | data[6];
-    		prog_state = PROG_STATE_MW_WRITE;
+    		setupMicrowireOperation(data, PROG_STATE_MW_WRITE);
     		len = USB_NO_MSG;
 
 	} else if (data[1] == USBASP_FUNC_MW_READ) {
-    		// data[2] - младший байт адреса, data[3] - старший байт адреса  
-    		mw_addr = (data[3] << 8) | data[2];
-    		mw_bitnum = data[4];  // количество бит для передачи
-    
-    		prog_nbytes = (data[7] << 8) | data[6];
-    		prog_state = PROG_STATE_MW_READ;
+    		setupMicrowireOperation(data, PROG_STATE_MW_READ);
     		len = USB_NO_MSG;
-
 			
 	} else if (data[1] == USBASP_FUNC_MW_BUSY) {
 		if (mwBusy() == 1) 
