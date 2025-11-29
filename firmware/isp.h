@@ -79,4 +79,8 @@ void ispLoadExtendedAddressByte(uint32_t address);
 /* */
 void spibusy(void);
 
+void ispSaveSpeedToEEPROM(uchar speed);
+
+void ispLoadLastSpeed(void);
+
 #endif /* __isp_h_included__ */
