@@ -18,17 +18,13 @@
 #include <stddef.h>
 #include <avr/eeprom.h>
 
-// Любой свободный байт в EEPROM
-#define EEPROM_SPEED_ADDR 0x10U   // просто 16-ый байт EEPROM
-
 #define ISP_SPEED_CNT (sizeof(isp_retry_speeds)/sizeof(isp_retry_speeds[0]))
 #define GET_SPEED(idx) pgm_read_byte(&isp_retry_speeds[(idx)])
 
 extern uchar prog_sck;
-static uchar last_success_speed = USBASP_ISP_SCK_AUTO;
+uint8_t last_success_speed = USBASP_ISP_SCK_AUTO;
 uchar (*ispTransmit)(uchar) = NULL;
 
-// Массив скоростей для авто-подбора в программной памяти
 // Массив скоростей для авто-подбора (от БЫСТРОЙ к МЕДЛЕННОЙ)
 static const uchar isp_retry_speeds[] PROGMEM = {
 

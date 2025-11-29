@@ -8,6 +8,9 @@
  * Creation Date..: 2005-02-23
  * Last change....: 2009-02-28
  */
+/* isp.h Ц то, что уже есть, плюс: */
+#ifndef ISP_H
+#define ISP_H
 
 #ifndef __isp_h_included__
 #define	__isp_h_included__
@@ -84,3 +87,8 @@ void ispSaveSpeedToEEPROM(uchar speed);
 void ispLoadLastSpeed(void);
 
 #endif /* __isp_h_included__ */
+
+#define EEPROM_SPEED_ADDR  0x10U   // одно место определени€
+extern uint8_t last_success_speed; // объ€вление, а не определение
+
+#endif
