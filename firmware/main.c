@@ -764,6 +764,8 @@ int main(void) {
     /* main event loop */
     usbInit();
 
+    ispLoadLastSpeed();
+
     sei();
     
     for (;;) {
