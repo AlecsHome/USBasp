@@ -81,25 +81,20 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 	usbMsgLen_t len = 0;
 	
 	if (data[1] == USBASP_FUNC_CONNECT) {
-	        /* Код проверял вывод PC2, на котором в оригинальном программаторе поддерживалась перемычка 
-                «медленный SCK», вместо этого мы устанавливаем максимальную скорость. */
-	        /* set max SCK speed */
-/*        	if ((PINC & (1 << PC2)) == 0) {
-                ispSetSCKOption(USBASP_ISP_SCK_3000);
-        	} else {
-                ispSetSCKOption(prog_sck);
-        	}
-*/
-		/* set SCK speed */
-		ispSetSCKOption(prog_sck);
-		
-		/* set compatibility mode of address delivering */
-		prog_address_newmode = 0;
+    	  ispSetSCKOption(prog_sck);
+    	  prog_address_newmode = 0;
 
-		ledRedOn();
-		ispConnect();
-                replyBuffer[0] = ispEnterProgrammingMode(); // Потом пытаемся войти в режим программирования
-    		len = 1;
+    	ledRedOn();
+    	ispConnect();
+
+    	uint8_t rc = ispEnterProgrammingMode();
+    	 if (rc != 0) {
+          last_success_speed = USBASP_ISP_SCK_AUTO;   // <-- сброс 
+	  ispDisconnect();        // <-- критично
+          }
+
+        replyBuffer[0] = rc;
+	len = 1;
 								
 //spi --------------------------------------------------------------
 	} else if (data[1] == USBASP_FUNC_SPI_CONNECT) {
@@ -298,19 +293,10 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 		/* set new address */
 		prog_address = *((unsigned long*) &data[2]);
 
-                //# «сбросить» сохранённую скорость
-		// avrdude -c usbasp -x usbasparg=0xFF        # через -x (поддерживается)
 	} else if (data[1] == USBASP_FUNC_SETISPSCK) {
-    		uint8_t newSCK = data[2];
-
-    		if (newSCK == 0xFF) {        /* «секретный» код сброса */
-        	 eeprom_update_byte((uint8_t *)EEPROM_SPEED_ADDR, 0xFF);
-        	 last_success_speed = USBASP_ISP_SCK_AUTO;
-        	 replyBuffer[0] = 0;         /* OK */
-    		} else {                     /* обычная установка SCK */
-        	prog_sck = newSCK;
-        	replyBuffer[0] = 0;
-    		 }
+    		// Обычная установка скорости (без сброса через 0xFF)
+    		prog_sck = data[2];
+    		replyBuffer[0] = 0;
     		len = 1;
 
        	} else if (data[1] == USBASP_FUNC_GETISPSCK) {
@@ -754,7 +740,6 @@ int main(void) {
     //   PORTC = (1 << PC0) | (1 << PC1); // Светодиоды выключены (общий анод)
     // Включим подтяжки для остальных пинов, включая PC2
     PORTC |= (1 << PC2) | (1 << PC3) | (1 << PC4) | (1 << PC5);
-   
     /* ----------- индикация ----------- */
 
     ledRedOn();
@@ -772,8 +757,6 @@ int main(void) {
     
     /* main event loop */
     usbInit();
-
-    ispLoadLastSpeed();
 
     sei();
     

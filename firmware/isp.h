@@ -27,6 +27,9 @@
 #define ISP_MISO  PB4
 #define ISP_SCK   PB5
 
+#define JP3_PIN  PINC
+#define JP3_BIT  PC2
+
 #define FLASH_MAX_BYTES   (512UL*1024)
 #define EXTADDR_BLOCK     (0x20000UL)
 #define EXTADDR_BLOCKS    (FLASH_MAX_BYTES / EXTADDR_BLOCK)
@@ -85,6 +88,8 @@ void spibusy(void);
 void ispSaveSpeedToEEPROM(uchar speed);
 
 void ispLoadLastSpeed(void);
+
+void ispResetStoredSpeed(void);
 
 #endif /* __isp_h_included__ */
 

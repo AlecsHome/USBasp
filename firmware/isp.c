@@ -23,6 +23,7 @@
 
 extern uchar prog_sck;
 uint8_t last_success_speed = USBASP_ISP_SCK_AUTO;
+uchar last_saved_speed = 0xFF;  // Делаем переменную доступной для всех функций в файле
 uchar (*ispTransmit)(uchar) = NULL;
 
 // Массив скоростей для авто-подбора (от БЫСТРОЙ к МЕДЛЕННОЙ)
@@ -248,24 +249,31 @@ uchar ispTransmit_hw(uchar send_byte) {
 
 // Улучшенная версия с защитой от износа EEPROM
 void ispSaveSpeedToEEPROM(uchar speed) {
-    static uchar last_saved_speed = 0xFF;
-    
-    // Сохраняем только если скорость изменилась
-    if (speed != last_saved_speed) {
+    // Сохраняем только если скорость изменилась и она валидна
+    if (speed != last_saved_speed && 
+        speed >= USBASP_ISP_SCK_0_5 && 
+        speed <= USBASP_ISP_SCK_6000) {
+        
         eeprom_update_byte((uint8_t *)EEPROM_SPEED_ADDR, speed);
         last_saved_speed = speed;
+        
     }
 }
 
 void ispLoadLastSpeed(void) {
-    uint8_t eep_speed = eeprom_read_byte((uint8_t *)EEPROM_SPEED_ADDR);
-     // Проверяем, что значение из EEPROM валидно
-    if (eep_speed >= USBASP_ISP_SCK_0_5 && eep_speed <= USBASP_ISP_SCK_6000) {
-        last_success_speed = eep_speed;
-    } else {
-         // Невалидное значение - используем авторежим
-        last_success_speed = USBASP_ISP_SCK_AUTO; // значение по умолчанию
+    uint8_t s = eeprom_read_byte((uint8_t *)EEPROM_SPEED_ADDR);
+    if (s == 0xFF) {                    // свежее стирание
+        s = USBASP_ISP_SCK_375;         // безопасная
+        eeprom_update_byte((uint8_t *)EEPROM_SPEED_ADDR, s);
     }
+    last_success_speed = (s >= USBASP_ISP_SCK_0_5 && s <= USBASP_ISP_SCK_6000)
+                         ? s : USBASP_ISP_SCK_AUTO;
+}
+
+// Функция сброса сохраненной скорости
+void ispResetStoredSpeed(void) {
+	last_success_speed = USBASP_ISP_SCK_AUTO;
+    	eeprom_update_byte((uint8_t *)EEPROM_SPEED_ADDR, 0xFF);
 }
 
 uchar ispEnterProgrammingMode(void) {
@@ -278,9 +286,9 @@ uchar ispEnterProgrammingMode(void) {
         for (uchar tries = 3; tries > 0; tries--) {
             // Сброс целевого устройства
             ISP_OUT |= (1 << ISP_RST); 
-            clockWait(10);
+            clockWait(11);
             ISP_OUT &= ~(1 << ISP_RST); 
-            clockWait(100);
+            clockWait(110);
 
             // Команда программирования enable
             ispTransmit(0xAC); 
@@ -292,7 +300,7 @@ uchar ispEnterProgrammingMode(void) {
                 prog_sck = last_success_speed;
                 return 0; // Успех
             }
-            clockWait(10);
+            clockWait(11);
         }
         last_success_speed = USBASP_ISP_SCK_AUTO; // Сброс при неудаче
     }
@@ -305,9 +313,9 @@ uchar ispEnterProgrammingMode(void) {
         for (uchar tries = 3; tries > 0; tries--) {
             // Сброс целевого устройства
             ISP_OUT |= (1 << ISP_RST); 
-            clockWait(10);
+            clockWait(11);
             ISP_OUT &= ~(1 << ISP_RST); 
-            clockWait(100);
+            clockWait(110);
 
             // Команда программирования enable
             ispTransmit(0xAC); 
@@ -322,13 +330,13 @@ uchar ispEnterProgrammingMode(void) {
                 ispSaveSpeedToEEPROM(current_speed);
 		return 0; // Успех
             }
-            clockWait(10);
+            clockWait(11);
         }
     }
 
     // Не удалось войти в режим программирования
     prog_sck = USBASP_ISP_SCK_AUTO;
-    ispSetSCKOption(USBASP_ISP_SCK_187_5); // Безопасная скорость по умолчанию
+    ispSetSCKOption(USBASP_ISP_SCK_375); // Безопасная скорость по умолчанию
     return 1; // Ошибка
 }
 
@@ -358,8 +366,7 @@ uchar ispReadFlash(uint32_t address) {
     ispTransmit(0x20 | ((address & 1) << 3));
     ispTransmit(address >> 9);
     ispTransmit(address >> 1);
- 
-    return ispTransmit(0);
+    return ispTransmit(0);   // собственно чтение
 }
 
 uchar ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode)
