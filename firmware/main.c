@@ -37,6 +37,7 @@ static uint8_t i2c_eeprom_device_addr = 0xA0;
 static uint8_t i2c_eeprom_addr_size = 0;
 static uint8_t i2c_stop_aw = 1;
 static uint8_t prog_address_sent = 0;  // Флаг отправки адреса
+static uint8_t  rc;
 
 static void setupTransfer(uint8_t *data, uint8_t new_state) {
     prog_address = (data[3] << 8) | data[2];
@@ -80,25 +81,21 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 	usbMsgLen_t len = 0;
 	
 	if (data[1] == USBASP_FUNC_CONNECT) {
-	        /* Код проверял вывод PC2, на котором в оригинальном программаторе поддерживалась перемычка 
-                «медленный SCK», вместо этого мы устанавливаем максимальную скорость. */
-	        /* set max SCK speed */
-/*        	if ((PINC & (1 << PC2)) == 0) {
-                ispSetSCKOption(USBASP_ISP_SCK_3000);
-        	} else {
-                ispSetSCKOption(prog_sck);
-        	}
-*/
-		/* set SCK speed */
-		ispSetSCKOption(prog_sck);
-		
-		/* set compatibility mode of address delivering */
-		prog_address_newmode = 0;
 
-		ledRedOn();
-		ispConnect();
-                replyBuffer[0] = ispEnterProgrammingMode(); // Потом пытаемся войти в режим программирования
-    		len = 1;
+    	  ispSetSCKOption(prog_sck);
+    	  prog_address_newmode = 0;
+
+    	  ledRedOn();
+    	  ispConnect();
+
+    	   rc = ispEnterProgrammingMode();
+    	   if (rc != 0) {
+           ispDisconnect();        // <-- критично
+           last_success_speed = USBASP_ISP_SCK_AUTO;   // <-- сброс  
+	    }
+
+           replyBuffer[0] = rc;
+	   len = 1;
 								
 //spi --------------------------------------------------------------
 	} else if (data[1] == USBASP_FUNC_SPI_CONNECT) {
