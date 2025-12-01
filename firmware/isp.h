@@ -8,7 +8,7 @@
  * Creation Date..: 2005-02-23
  * Last change....: 2009-02-28
  */
-/* isp.h – то, что уже есть, плюс: */
+
 #ifndef ISP_H
 #define ISP_H
 
@@ -26,9 +26,6 @@
 #define ISP_MOSI  PB3
 #define ISP_MISO  PB4
 #define ISP_SCK   PB5
-
-#define JP3_PIN  PINC
-#define JP3_BIT  PC2
 
 #define FLASH_MAX_BYTES   (512UL*1024)
 #define EXTADDR_BLOCK     (0x20000UL)
@@ -91,6 +88,7 @@ void ispLoadLastSpeed(void);
 
 void ispResetStoredSpeed(void);
 
+uchar ispFlushEEPROMPage(uint16_t addr);
 #endif /* __isp_h_included__ */
 
 #define EEPROM_SPEED_ADDR  0x10U   // одно место определения

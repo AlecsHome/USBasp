@@ -11,7 +11,6 @@
 #include "tpi_defs.h"
 #include "I2c.h"
 #include "microwire.h"
-#include <avr/eeprom.h>
 
 /* Макрос для быстрой проверки минимального значения */
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -81,20 +80,25 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 	usbMsgLen_t len = 0;
 	
 	if (data[1] == USBASP_FUNC_CONNECT) {
-    	  ispSetSCKOption(prog_sck);
-    	  prog_address_newmode = 0;
+	        /* Код проверял вывод PC2, на котором в оригинальном программаторе поддерживалась перемычка 
+                «медленный SCK», вместо этого мы устанавливаем максимальную скорость. */
+	        /* set max SCK speed */
+/*        	if ((PINC & (1 << PC2)) == 0) {
+                ispSetSCKOption(USBASP_ISP_SCK_3000);
+        	} else {
+                ispSetSCKOption(prog_sck);
+        	}
+*/
+		/* set SCK speed */
+		ispSetSCKOption(prog_sck);
+		
+		/* set compatibility mode of address delivering */
+		prog_address_newmode = 0;
 
-    	ledRedOn();
-    	ispConnect();
-
-    	uint8_t rc = ispEnterProgrammingMode();
-    	 if (rc != 0) {
-          last_success_speed = USBASP_ISP_SCK_AUTO;   // <-- сброс 
-	  ispDisconnect();        // <-- критично
-          }
-
-        replyBuffer[0] = rc;
-	len = 1;
+		ledRedOn();
+		ispConnect();
+                replyBuffer[0] = ispEnterProgrammingMode(); // Потом пытаемся войти в режим программирования
+    		len = 1;
 								
 //spi --------------------------------------------------------------
 	} else if (data[1] == USBASP_FUNC_SPI_CONNECT) {
@@ -294,10 +298,11 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 		prog_address = *((unsigned long*) &data[2]);
 
 	} else if (data[1] == USBASP_FUNC_SETISPSCK) {
-    		// Обычная установка скорости (без сброса через 0xFF)
-    		prog_sck = data[2];
-    		replyBuffer[0] = 0;
-    		len = 1;
+
+		/* set sck option */
+		prog_sck = data[2];
+		replyBuffer[0] = 0;
+		len = 1;
 
        	} else if (data[1] == USBASP_FUNC_GETISPSCK) {
     		replyBuffer[0] = 0;
@@ -664,56 +669,85 @@ uchar usbFunctionWrite(uchar *data, uchar len)
     	}
     	goto exit;
 	}
+      
+	/* ---------- Flash – с extended addressing ---------- */ 	
+	if (prog_state == PROG_STATE_WRITEFLASH) {
 
-	/* ---------- Flash / EEPROM – общий цикл с выбором функции ----- */
+    
+    	// Более эффективная обработка страниц
+    	for (i = 0; i < len; i++) {
+          if (prog_pagesize == 0) {
+            /* not paged - immediate programming */
+            if (ispWriteFlash(prog_address, data[i], 1) != 0) {
+                retVal = 0xFB; // Ошибка записи Flash
+                goto exit;
+            }
+           } else {
+            /* paged - write to buffer */
+            if (ispWriteFlash(prog_address, data[i], 0) != 0) {
+                retVal = 0xFB;
+                goto exit;
+            }
+            
+            // Если заполнили страницу - сбрасываем ее
+            if (--prog_pagecounter == 0) {
+                // Используем базовый адрес страницы для flush
+                uint32_t page_base = prog_address & ~(prog_pagesize - 1);
+                if (ispFlushPage(page_base) != 0) {
+                    retVal = 0xFA; // Ошибка сброса страницы
+                    goto exit;
+                }
+                prog_pagecounter = prog_pagesize;
+               }
+             }
+            prog_address++;
+    	  }
+    
+     	  prog_nbytes -= len;
+    
+    	if (prog_nbytes == 0) {
+         // Если осталась неполная страница - сбросить ее
+         if ((prog_pagesize != 0) && (prog_pagecounter != prog_pagesize)) {
+            uint32_t page_base = (prog_address - 1) & ~(prog_pagesize - 1);
+            if (ispFlushPage(page_base) != 0) {
+                retVal = 0xFA;
+                goto exit;
+            }
+          }
+        prog_state = PROG_STATE_IDLE;
+        retVal = 1;
+       }
+        goto exit;
+       }
 
-	if (prog_state == PROG_STATE_WRITEFLASH || prog_state == PROG_STATE_WRITEEEPROM) {
-
-    	/* защита EEPROM-адреса (один раз – достаточно) */
-    	if (prog_state == PROG_STATE_WRITEEEPROM && prog_address >= 0x10000UL) {
-        retVal = 0xFC; goto exit;
-    	}
-
-    	uint32_t page_base = prog_pagesize ? (prog_address & ~(prog_pagesize - 1)) : 0;
-    	uint8_t  poll      = !prog_pagesize;
-
-    	for (uint8_t i = 0; i < len; i++) {
-        /* запись */
-        if ((prog_state == PROG_STATE_WRITEFLASH)
-                ? ispWriteFlash(prog_address, data[i], poll)
-                : ispWriteEEPROM((uint16_t)prog_address, data[i])) {
-            retVal = (prog_state == PROG_STATE_WRITEFLASH) ? 0xFB : 0xFC;
+        /* ---------- EEPROM – без extended addressing ---------- */
+	if (prog_state == PROG_STATE_WRITEEEPROM) {
+    
+    	// Проверка на выход за пределы 16-битного адресного пространства
+    	if (prog_address >= 0x10000UL) {
+          retVal = 0xFC; // Ошибка: адрес EEPROM вне диапазона
+          goto exit;
+        }
+    
+    	for (i = 0; i < len; i++) {
+          if (ispWriteEEPROM((unsigned int)prog_address, data[i]) != 0) {
+            retVal = 0xFC; // Ошибка записи EEPROM
             goto exit;
         }
-
-        /* flush страницы */
-        if (prog_pagesize && (--prog_pagecounter == 0)) {
-            if (ispFlushPage(page_base)) { retVal = 0xFA; goto exit; }
-            page_base += prog_pagesize;
-            prog_pagecounter = prog_pagesize;
-        	}
-        	prog_address++;
-    	}
-
-    	prog_nbytes -= len;
-
-    	if (prog_nbytes == 0) {
-         if (prog_pagesize && prog_pagecounter != prog_pagesize) {
-            if (ispFlushPage((prog_address - 1) & ~(prog_pagesize - 1))) {
-                retVal = 0xFA; goto exit;
-            }
-        	}
-        	prog_state = PROG_STATE_IDLE;
-       	    retVal = 1;
-    	} else {
-            retVal = 0;
-    	  }
-    	 goto exit;
-	}   
-
-     /* --- Неизвестное состояние --- */
-     retVal = 0xFF;
-
+         prog_address++;
+       }
+    
+      prog_nbytes -= len;
+    
+      if (prog_nbytes == 0) {
+        prog_state = PROG_STATE_IDLE;
+        retVal = 1;
+       }
+      goto exit;
+    } 
+    /* Неизвестное состояние */
+    retVal = 0xFF;
+ 
   exit:
     ledGreenOff();
     ledRedOn();
@@ -740,6 +774,7 @@ int main(void) {
     //   PORTC = (1 << PC0) | (1 << PC1); // Светодиоды выключены (общий анод)
     // Включим подтяжки для остальных пинов, включая PC2
     PORTC |= (1 << PC2) | (1 << PC3) | (1 << PC4) | (1 << PC5);
+   
     /* ----------- индикация ----------- */
 
     ledRedOn();
