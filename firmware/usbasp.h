@@ -116,7 +116,7 @@
 #define USBASP_ISP_SCK_6000   	14  /* 6 MHz   */
 
 /* macros for gpio functions */
-#define ledRedOff()    PORTC |=  (1 << PC0)   // анод через резистор к +5 ¬
+#define ledRedOff()    PORTC |=  (1 << PC0)   // анод через резистор к +5V
 #define ledRedOn()     PORTC &= ~(1 << PC0)   // катод к GND > светодиод горит
 
 #define ledGreenOff()  PORTC |=  (1 << PC1)
@@ -125,5 +125,7 @@
 #define SLOW_SCK_PORT PORTC
 #define SLOW_SCK_PIN  PINC
 #define SLOW_SCK_NUM  PC2
+
+#define USB_CFG_BUFFER_SIZE     	64    /* Размер буфера USB */
 
 #endif /* USBASP_H_ */

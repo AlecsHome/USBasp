@@ -82,16 +82,18 @@ void ispLoadExtendedAddressByte(uint32_t address);
 /* */
 void spibusy(void);
 
-void ispSaveSpeedToEEPROM(uchar speed);
+//void ispSaveSpeedToEEPROM(uchar speed);
 
-void ispLoadLastSpeed(void);
+//void ispLoadLastSpeed(void);
 
-void ispResetStoredSpeed(void);
+//void ispResetStoredSpeed(void);
 
-uchar ispFlushEEPROMPage(uint16_t addr);
+void ispUpdateExtended(uint32_t address);
+
 #endif /* __isp_h_included__ */
 
-#define EEPROM_SPEED_ADDR  0x10U   // одно место определения
+//#define EEPROM_SPEED_ADDR  0x10U   // одно место определения
 extern uint8_t last_success_speed; // объявление, а не определение
+extern uchar isp_hiaddr;
 
 #endif

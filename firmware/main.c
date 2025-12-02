@@ -288,14 +288,12 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
     		len = USB_NO_MSG;
 
 	} else if (data[1] == USBASP_FUNC_SETLONGADDRESS) {
-
 		/* set new mode of address delivering (ignore address delivered in commands) */
 		prog_address_newmode = 1;
 		/* set new address */
 		prog_address = *((unsigned long*) &data[2]);
 
 	} else if (data[1] == USBASP_FUNC_SETISPSCK) {
-
 		/* set sck option */
 		prog_sck = data[2];
 		replyBuffer[0] = 0;
@@ -364,9 +362,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 		replyBuffer[2] = 0;
 		replyBuffer[3] = USBASP_CAP_3_FLASH | USBASP_CAP_3_EEPROM | USBASP_CAP_3_FUSES | USBASP_CAP_3_LOCKBITS;
 		len = 4;
-	 
      	}
-
 	usbMsgPtr = replyBuffer;
 
 	return len;
@@ -388,7 +384,7 @@ uchar usbFunctionRead(uchar *data, uchar len)
     len = MIN(len, prog_nbytes);
     ledGreenOn();
 
-    /*---------- TPI ---------- */
+    /* TPI – быстро отдельно */
     if (prog_state == PROG_STATE_TPI_READ) {
         tpi_read_block(prog_address, data, len);
         prog_address += len;
@@ -399,7 +395,7 @@ uchar usbFunctionRead(uchar *data, uchar len)
         goto exit_success;
     }
 
-    /*---------- SPI ---------- */
+    /* SPI – без буфера */
     if (prog_state == PROG_STATE_SPI_READ) {
         for (uint8_t i = 0; i < len; i++) {
             data[i] = ispTransmit(0);
@@ -417,7 +413,7 @@ uchar usbFunctionRead(uchar *data, uchar len)
     }
 
     /* ---------- I2C – без буфера ---------- */
-    /* usbFunctionRead - расширенная обработка I2C */
+    /* В usbFunctionRead - расширенная обработка I2C */
 	if (prog_state == PROG_STATE_I2C_READ) {
     	  if (i2c_eeprom_mode) {
           // EEPROM режим - уже установлен указатель, просто читаем данные
@@ -441,7 +437,7 @@ uchar usbFunctionRead(uchar *data, uchar len)
        goto exit_success;
      }
 
-    /* ---------- MW – без буфера ----------*/
+    /* MW – без буфера */
     if (prog_state == PROG_STATE_MW_READ) {
         for (uint8_t i = 0; i < len; i++) {
             data[i] = mwReadByte();
@@ -455,31 +451,53 @@ uchar usbFunctionRead(uchar *data, uchar len)
         goto exit_success;
     }
 
-    /* ISP (Flash/EEPROM) – читаем сразу в пакет */
-    if (prog_state == PROG_STATE_READFLASH || prog_state == PROG_STATE_READEEPROM) {
-        if (prog_state == PROG_STATE_READFLASH) {
-            /* Чтение Flash памяти (поддерживает >64K) */
-            for (uint8_t i = 0; i < len; i++) {
-                data[i] = ispReadFlash(prog_address);
-                prog_address++;
-            }
-        } else {
-            /* Чтение EEPROM (ограничено 64K) с проверкой границ */
-            for (uint8_t i = 0; i < len; i++) {
-                if (prog_address <= 0xFFFF) {
-                    data[i] = ispReadEEPROM((uint16_t)prog_address);
-                } else {
-                    // Ошибка: выход за пределы адресного пространства EEPROM
-                    data[i] = 0xFF; // или другое значение ошибки
-                }
-                prog_address++;
-            }
-        }
-        prog_nbytes -= len;
-        if (prog_nbytes == 0) {
-            prog_state = PROG_STATE_IDLE;
-        }
-        goto exit_success;
+	/* ISP (Flash/EEPROM) – оптимизированное чтение с буферизацией */
+	if (prog_state == PROG_STATE_READFLASH || prog_state == PROG_STATE_READEEPROM) {
+    
+	    // Оптимизация: максимизируем размер пакета
+	    len = MIN(len, prog_nbytes);
+    
+	    if (prog_state == PROG_STATE_READFLASH) {
+	        /* Чтение Flash с оптимизацией extended адреса */
+	        uint8_t current_hiaddr = 0xFF;
+	        uint8_t needs_ext_update = 0;
+        
+	        for (uint8_t i = 0; i < len; i++) {
+	            // Проверяем extended адрес (каждые 128K)
+	            uint8_t new_hiaddr = (uint8_t)(prog_address >> 17);
+	            if (new_hiaddr != current_hiaddr) {
+	                current_hiaddr = new_hiaddr;
+	                needs_ext_update = 1;
+	            }
+            
+	            // Если нужно обновить extended адрес или это первый байт
+	            if (needs_ext_update ) {
+	                ispUpdateExtended(prog_address);
+	                needs_ext_update = 0;
+	            }
+            
+	            data[i] = ispReadFlash(prog_address);
+	            prog_address++;
+	        }
+	    } else {
+	        /* Чтение EEPROM (ограничено 4K) */
+	        for (uint8_t i = 0; i < len; i++) {
+	            if (prog_address <= 0xFFF) {  // 0x0FFF = 4095 (4K для ATmega2560 для  xMega возможно 0xFFFF если >64k)
+	                data[i] = ispReadEEPROM((uint16_t)prog_address);
+	            } else {
+	                data[i] = 0xFF; // Ошибка адреса
+	            }
+	            prog_address++;
+	        }
+	    }
+    
+	    prog_nbytes -= len;
+	    if (prog_nbytes == 0) {
+	        prog_state = PROG_STATE_IDLE;
+	    }
+    
+	    // Оптимизация: возвращаем реальное количество прочитанных байт
+	    goto exit_success;
     }
 
     /* Неизвестное состояние */
@@ -667,84 +685,54 @@ uchar usbFunctionWrite(uchar *data, uchar len)
     	goto exit;
 	}
       
-	/* ---------- Flash – с extended addressing ---------- */ 	
-	if (prog_state == PROG_STATE_WRITEFLASH) {
+	/* ---------- Flash / EEPROM – общий цикл с выбором функции ----- */
+	if (prog_state == PROG_STATE_WRITEFLASH || prog_state == PROG_STATE_WRITEEEPROM) {
 
-    
-    	// Более эффективная обработка страниц
-    	for (i = 0; i < len; i++) {
-          if (prog_pagesize == 0) {
-            /* not paged - immediate programming */
-            if (ispWriteFlash(prog_address, data[i], 1) != 0) {
-                retVal = 0xFB; // Ошибка записи Flash
-                goto exit;
-            }
-           } else {
-            /* paged - write to buffer */
-            if (ispWriteFlash(prog_address, data[i], 0) != 0) {
-                retVal = 0xFB;
-                goto exit;
-            }
-            
-            // Если заполнили страницу - сбрасываем ее
-            if (--prog_pagecounter == 0) {
-                // Используем базовый адрес страницы для flush
-                uint32_t page_base = prog_address & ~(prog_pagesize - 1);
-                if (ispFlushPage(page_base) != 0) {
-                    retVal = 0xFA; // Ошибка сброса страницы
-                    goto exit;
-                }
-                prog_pagecounter = prog_pagesize;
-               }
-             }
-            prog_address++;
-    	  }
-    
-     	  prog_nbytes -= len;
-    
-    	if (prog_nbytes == 0) {
-         // Если осталась неполная страница - сбросить ее
-         if ((prog_pagesize != 0) && (prog_pagecounter != prog_pagesize)) {
-            uint32_t page_base = (prog_address - 1) & ~(prog_pagesize - 1);
-            if (ispFlushPage(page_base) != 0) {
-                retVal = 0xFA;
-                goto exit;
-            }
-          }
-        prog_state = PROG_STATE_IDLE;
-        retVal = 1;
-       }
-        goto exit;
-       }
+    	/* защита EEPROM-адреса (один раз – достаточно) */
+    	if (prog_state == PROG_STATE_WRITEEEPROM && prog_address >= 0x10000UL) {
+        retVal = 0xFC; goto exit;
+    	}
 
-        /* ---------- EEPROM – без extended addressing ---------- */
-	if (prog_state == PROG_STATE_WRITEEEPROM) {
-    
-    	// Проверка на выход за пределы 16-битного адресного пространства
-    	if (prog_address >= 0x10000UL) {
-          retVal = 0xFC; // Ошибка: адрес EEPROM вне диапазона
-          goto exit;
-        }
-    
-    	for (i = 0; i < len; i++) {
-          if (ispWriteEEPROM((unsigned int)prog_address, data[i]) != 0) {
-            retVal = 0xFC; // Ошибка записи EEPROM
+    	uint32_t page_base = prog_pagesize ? (prog_address & ~(prog_pagesize - 1)) : 0;
+    	uint8_t  poll      = !prog_pagesize;
+
+    	for (uint8_t i = 0; i < len; i++) {
+        /* запись */
+        if ((prog_state == PROG_STATE_WRITEFLASH)
+                ? ispWriteFlash(prog_address, data[i], poll)
+                : ispWriteEEPROM((uint16_t)prog_address, data[i])) {
+            retVal = (prog_state == PROG_STATE_WRITEFLASH) ? 0xFB : 0xFC;
             goto exit;
         }
-         prog_address++;
-       }
-    
-      prog_nbytes -= len;
-    
-      if (prog_nbytes == 0) {
-        prog_state = PROG_STATE_IDLE;
-        retVal = 1;
-       }
-      goto exit;
-    } 
-    /* Неизвестное состояние */
-    retVal = 0xFF;
- 
+
+        /* flush страницы */
+        if (prog_pagesize && (--prog_pagecounter == 0)) {
+            if (ispFlushPage(page_base)) { retVal = 0xFA; goto exit; }
+            page_base += prog_pagesize;
+            prog_pagecounter = prog_pagesize;
+        	}
+        	prog_address++;
+    	}
+
+    	prog_nbytes -= len;
+
+    	if (prog_nbytes == 0) {
+         if (prog_pagesize && prog_pagecounter != prog_pagesize) {
+            if (ispFlushPage((prog_address - 1) & ~(prog_pagesize - 1))) {
+                retVal = 0xFA; goto exit;
+            }
+        	}
+        	prog_state = PROG_STATE_IDLE;
+       	    retVal = 1;
+    	} else {
+            retVal = 0;
+    	  }
+    	 goto exit;
+	}   
+
+     /* --- Неизвестное состояние --- */
+     retVal = 0xFF;
+
   exit:
     ledGreenOff();
     ledRedOn();
