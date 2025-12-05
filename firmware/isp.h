@@ -27,8 +27,10 @@
 #define ISP_MISO  PB4
 #define ISP_SCK   PB5
 
-#define FLASH_MAX_BYTES   (512UL*1024)
-#define EXTADDR_BLOCK     (0x20000UL)
+// Для поддержки всех AVR нужно правильно определить:
+#define FLASH_MAX_BYTES   (512UL*1024)    // Максимум для USBasp
+#define MAX_EEPROM_SIZE   (64UL * 1024)   // 64KB - максимум 16-битного адреса
+#define EXTADDR_BLOCK     (0x20000UL)     // 128K граница
 #define EXTADDR_BLOCKS    (FLASH_MAX_BYTES / EXTADDR_BLOCK)
 
 #define CS_LOW()	ISP_OUT &= ~(1 << ISP_RST); /* RST low */
@@ -73,27 +75,21 @@ uchar ispWriteEEPROM(unsigned int address, uchar data);
 uchar (*ispTransmit)(uchar);
 
 /* set SCK speed. call before ispConnect! */
-//void ispSetSCKOption(uchar sckoption);
 void ispSetSCKOption(uchar option);
 
 /* load extended address byte */
 void ispLoadExtendedAddressByte(uint32_t address);
 
-/* */
 void spibusy(void);
 
-//void ispSaveSpeedToEEPROM(uchar speed);
-
-//void ispLoadLastSpeed(void);
-
-//void ispResetStoredSpeed(void);
+uchar ispReadFlashRaw(uint32_t address);
 
 void ispUpdateExtended(uint32_t address);
 
-#endif /* __isp_h_included__ */
-
-//#define EEPROM_SPEED_ADDR  0x10U   // одно место определения
 extern uint8_t last_success_speed; // объявление, а не определение
+
 extern uchar isp_hiaddr;
+
+#endif /* __isp_h_included__ */
 
 #endif

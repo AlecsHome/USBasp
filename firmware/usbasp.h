@@ -60,9 +60,6 @@
 #define USBASP_CAP_0_I2C        0x08  // Поддержка I2C для 24xx памяти
 #define USBASP_CAP_0_MW         0x10  // Поддержка Microwire для 93xx памяти
 
-//#define USBASP_CAP_0_SWD        0x20  // Поддержка SWD для ARM
-//#define USBASP_CAP_0_JTAG       0x40  // Поддержка JTAG
-
 // Байт 1: Дополнительные возможности
 #define USBASP_CAP_1_SCK_AUTO   0x01  // Автоматическое определение SCK
 //#define USBASP_CAP_1_VTARGET    0x02  // Измерение напряжения целевого устройства

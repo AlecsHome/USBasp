@@ -64,7 +64,7 @@ void ispSetSCKOption(uchar option) {
    // Всегда сбрасываем состояние SPI перед изменением скорости
     SPCR = 0;
 	if (option == USBASP_ISP_SCK_AUTO)
- 		option = USBASP_ISP_SCK_1500;  // Значение по умолчанию для авто-режима
+ 		option = USBASP_ISP_SCK_6000;  // Значение по умолчанию для авто-режима
 
 	if (option >= USBASP_ISP_SCK_93_75) {
 		ispTransmit = (uchar (*)(uchar))ispTransmit_hw;
@@ -331,15 +331,18 @@ void ispUpdateExtended(uint32_t address)
     ispTransmit(0x00);
 }
 
-uchar ispReadFlash(uint32_t address) {
-
-    ispUpdateExtended(address);
- 
+uchar ispReadFlashRaw(uint32_t address)
+{
     ispTransmit(0x20 | ((address & 1) << 3));
     ispTransmit(address >> 9);
     ispTransmit(address >> 1);
- 
     return ispTransmit(0);
+}
+
+uchar ispReadFlash(uint32_t address)
+{
+    ispUpdateExtended(address);
+    return ispReadFlashRaw(address);
 }
 
 uchar ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode)
