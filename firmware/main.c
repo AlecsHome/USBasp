@@ -27,7 +27,13 @@
 #include "microwire.h"
 
 /* Макрос для быстрой проверки минимального значения */
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
+//#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+// Правильный макрос MIN для разных типов
+#define MIN(a, b) ({ \
+    __typeof__(a) _a = (a); \
+    __typeof__(b) _b = (b); \
+    _a < _b ? _a : _b; \
+})
 
 // --- Перемещаем ОПРЕДЕЛЕНИЯ переменных ВВЕРХ ---
 //static uint8_t flash_hiaddr_cache = 0xFF; // вместо current_hiaddr
@@ -461,30 +467,44 @@ uchar usbFunctionRead(uchar *data, uchar len)
         goto exit_success;
     }
 
-
-	/* ---------- Супер-оптимизированное чтение Flash ---------- */
-
+	/* ---------- ГИБРИДНЫЙ ВАРИАНТ - лучший компромисс ---------- */
 	if (prog_state == PROG_STATE_READFLASH) {
     
-	    // Если весь блок в пределах <128K, не вызываем ispUpdateExtended()
+	    // Быстрая проверка: если адрес <128K, extended адрес не нужен
 	    if ((prog_address + len - 1) < 0x20000) {
-	        // БЫСТРЫЙ ПУТЬ: без вызовов ispUpdateExtended()
+	        // БЫСТРЫЙ ПУТЬ для ATmega328P
 	        for (uint8_t i = 0; i < len; i++) {
 	            data[i] = ispReadFlashRaw(prog_address);
 	            prog_address++;
 	        }
 	    } else {
-	        // МЕДЛЕННЫЙ ПУТЬ: используем ispUpdateExtended() для каждого байта
-	        // (она сама проверит, нужно ли обновлять extended адрес)
-	        for (uint8_t i = 0; i < len; i++) {
-	            data[i] = ispReadFlash(prog_address);  // Вызывает ispUpdateExtended() внутри
-	            prog_address++;
+	        // МЕДЛЕННЫЙ ПУТЬ для ATmega2560 (упрощенный Вариант 3)
+	        uint8_t bytes_read = 0;
+        
+	        while (bytes_read < len) {
+	            // Установить extended адрес для текущей позиции
+	            ispUpdateExtended(prog_address);
+            
+	            // Читаем до конца текущего блока или до len
+	            uint32_t block_end = ((prog_address >> 17) + 1) << 17;
+	            uint8_t remaining = len - bytes_read;   // 0...255
+            
+	            // ВАЖНО: block_end - prog_address может быть > 255, поэтому нужен uint32_t
+	            uint32_t to_boundary = block_end - prog_address;  // 0...131071
+	            uint8_t chunk = (to_boundary > remaining) ? remaining : (uint8_t)to_boundary;
+            
+	            // Читаем chunk байт
+	            for (uint8_t i = 0; i < chunk; i++) {
+	                data[bytes_read + i] = ispReadFlashRaw(prog_address);
+	                prog_address++;
+	            }
+	            bytes_read += chunk;
 	        }
 	    }
-    
+
 	    prog_nbytes -= len;
 	    if (prog_nbytes == 0) prog_state = PROG_STATE_IDLE;
-	    goto exit_success;
+	  goto exit_success;
 	}
 	/* ---------- Чтение EEPROM ---------- */
 	if (prog_state == PROG_STATE_READEEPROM) {

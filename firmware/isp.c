@@ -312,19 +312,18 @@ uchar ispEnterProgrammingMode(void)
     return 1;
 }
 
-void ispUpdateExtended(uint32_t address)
-{
-    if (address < EXTADDR_BLOCK || address >= FLASH_MAX_BYTES)
+void ispUpdateExtended(uint32_t address) {
+    // Быстрая проверка: если адрес вне диапазона, сразу выходим
+    if (address < EXTADDR_BLOCK || address >= FLASH_MAX_BYTES) {
         return;
-
+    }
+    
     uint8_t curr_hiaddr = (uint8_t)(address >> 17);
-
-    if (curr_hiaddr == isp_hiaddr)
+    if (curr_hiaddr == isp_hiaddr) {
         return;
-
+    }
+    
     isp_hiaddr = curr_hiaddr;
-
-    // Отправка команды стандартными вызовами
     ispTransmit(0x4D);
     ispTransmit(0x00);
     ispTransmit(isp_hiaddr);
