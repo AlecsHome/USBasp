@@ -549,86 +549,74 @@ uchar usbFunctionWrite(uchar *data, uchar len)
         	}
         	goto exit;
     	}
-	/* ---------- I2C – EEPROM page-write (<= 64 байт за 5 мс) ---------- */
+	/* ---------- I2C Write (минималистичная) ---------- */
 	if (prog_state == PROG_STATE_I2C_WRITE) {
+    
+	    uint8_t i = 0;
+    
 	    if (i2c_eeprom_mode) {
-	        /* ---------- EEPROM режим с постраничной записью ---------- */
-	        uint8_t page_size = eepromPageSize(prog_address);
-	        uint8_t chunk = MIN(MIN(len, prog_nbytes), page_size - (prog_address % page_size));
-
-	        /* Отправляем заголовок (адрес устройства и адрес памяти) */
+	        // EEPROM: отправляем адрес один раз
 	        if (!prog_address_sent) {
 	            i2c_start();
-
 	            uint8_t dev = i2c_eeprom_device_addr;
-	            if (prog_address >= 0x10000UL) {
-	                dev |= ((prog_address >> 15) & 0x0E);
-	            }
-
-	            if (i2c_send_byte(dev | I2C_WRITE) != I2C_ACK) goto nak;
-
-	            // Отправляем адрес памяти
-	            if (prog_address >= 0x10000UL) {
-	                if (i2c_send_byte((prog_address >> 8) & 0xFF) != I2C_ACK) goto nak;
-	            }
-	            if (i2c_send_byte(prog_address & 0xFF) != I2C_ACK) goto nak;
-	
+	            if (prog_address >= 0x10000UL) dev |= ((prog_address >> 15) & 0x0E);
+	            if (i2c_send_byte(dev | I2C_WRITE) != I2C_ACK) goto i2c_error;
+            
+	            if (prog_address >= 0x10000UL) i2c_send_byte((prog_address >> 8) & 0xFF);
+	            i2c_send_byte(prog_address & 0xFF);
 	            prog_address_sent = 1;
 	        }
-
-	        /* Пишем данные */
-	        for (uint8_t i = 0; i < chunk; i++) {
-	            if (i2c_send_byte(data[i]) != I2C_ACK) goto nak;
+        
+	        // Пишем до конца страницы или лимита
+	        uint8_t page_size = eepromPageSize(prog_address);
+	        uint8_t space_in_page = page_size - (prog_address % page_size);
+	        uint8_t max_write = MIN(len, MIN(prog_nbytes, space_in_page));
+        
+	        for (i = 0; i < max_write; i++) {
+	            if (i2c_send_byte(data[i]) != I2C_ACK) goto i2c_error;
 	            prog_address++;
 	        }
-	        prog_nbytes -= chunk;
-
-	        /* Конец страницы или всей записи */
+	        prog_nbytes -= max_write;
+        
+	        // Если страница заполнена или запись закончена
 	        if (prog_nbytes == 0 || (prog_address % page_size) == 0) {
 	            i2c_stop();
-	            _delay_ms(5);  // Задержка записи EEPROM
+	            _delay_ms(5);
 	        }
-	
-	        if (prog_nbytes == 0) {
-	            prog_state = PROG_STATE_IDLE;
-	            i2c_eeprom_mode = 0;
-	            replyBuffer[0] = 1; // Успех
-	            len = 1;
-	        } else {
-	            replyBuffer[0] = chunk; // Сколько байт обработано
-	            len = 1;
-	        }
+        
 	    } else {
-	        /* ---------- Обычный I2C режим ---------- */
-	        for (uint8_t i = 0; i < len; i++) {
+	        // Обычный I2C
+	        for (i = 0; i < len; i++) {
 	            if (i2c_send_byte(data[i]) != I2C_ACK) {
-	                replyBuffer[0] = 0xFE;
-	                len = 1;
-	                goto exit;
+        	        retVal = 0xFE;
+	               goto exit;
 	            }
 	        }
 	        prog_nbytes -= len;
-
-	        if (prog_nbytes == 0) {
-	            if (i2c_stop_aw == 1) i2c_stop();
-	            prog_state = PROG_STATE_IDLE;
-	            replyBuffer[0] = 1;
-	            len = 1;
+        
+	        if (prog_nbytes == 0 && i2c_stop_aw) {
+	            i2c_stop();
 	        }
 	    }
-	    usbMsgPtr = replyBuffer;
-	    return len;
+    
+	    // Завершение операции
+	    if (prog_nbytes == 0) {
+	        prog_state = PROG_STATE_IDLE;
+	        i2c_eeprom_mode = 0;
+	        prog_address_sent = 0;
+	        retVal = 1;
+	    }
+	    goto exit;
 
-	nak: // Ошибка EEPROM
+	i2c_error:
 	    i2c_stop();
 	    prog_state = PROG_STATE_IDLE;
 	    i2c_eeprom_mode = 0;
 	    prog_address_sent = 0;
-	    replyBuffer[0] = 0xFE;
-	    len = 1;
-	    usbMsgPtr = replyBuffer;
-	    return len;
+	    retVal = 0xFE;
+	    goto exit;
 	}
+
 	/* ---------- MW ---------- */
 	    if (prog_state == PROG_STATE_MW_WRITE) {
         	if (mwSendDataBlock(data, len) != 0) return 0xFD;
