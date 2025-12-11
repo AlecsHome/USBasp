@@ -381,7 +381,7 @@ uchar ispFlushPage(uint32_t address) {
     for (uint8_t t = 25; t > 0; t--) {
         clockWait(t > 15 ? 1 : (t > 5 ? 2 : 4));
         if (ispReadFlash(address) != 0xFF) {
-            return 0; // Успех
+            return 0; // УСПЕХ - байт изменился
         }
     }
     
@@ -409,4 +409,3 @@ uchar ispWriteEEPROM(unsigned int address, uchar data) {
     return 0;
 
 }
-
