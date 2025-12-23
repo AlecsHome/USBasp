@@ -25,11 +25,13 @@ uint8_t last_success_speed = USBASP_ISP_SCK_AUTO;
 // Явный массив скоростей от САМОЙ БЫСТРОЙ к САМОЙ МЕДЛЕННОЙ
 // Порядок ВАЖЕН - от быстрой к медленной!
 static const uchar isp_retry_speeds[] PROGMEM = {
-
-    USBASP_ISP_SCK_6000,   // 6.0 MHz
+//  USBASP_ISP_SCK_6000,   // 6.0 MHz - если поддерживается
     USBASP_ISP_SCK_3000,   // 3.0 MHz
+    USBASP_ISP_SCK_2000,   // 2.0 MHz - добавить
     USBASP_ISP_SCK_1500,   // 1.5 MHz
+    USBASP_ISP_SCK_1000,   // 1.0 MHz - добавить для -B 1
     USBASP_ISP_SCK_750,    // 750 kHz
+    USBASP_ISP_SCK_500,    // 500 kHz - добавить
     USBASP_ISP_SCK_375,    // 375 kHz
     USBASP_ISP_SCK_187_5,  // 187.5 kHz
     USBASP_ISP_SCK_93_75,  // 93.75 kHz
@@ -64,7 +66,7 @@ void ispSetSCKOption(uchar option) {
    // Всегда сбрасываем состояние SPI перед изменением скорости
     SPCR = 0;
 	if (option == USBASP_ISP_SCK_AUTO)
- 		option = USBASP_ISP_SCK_6000;  // Значение по умолчанию для авто-режима
+ 		option = USBASP_ISP_SCK_3000;  // Значение по умолчанию для авто-режима
 
 	if (option >= USBASP_ISP_SCK_93_75) {
 		ispTransmit = (uchar (*)(uchar))ispTransmit_hw;
@@ -72,28 +74,43 @@ void ispSetSCKOption(uchar option) {
 		sck_sw_delay = 1;	/* force RST#/SCK pulse for 320us */
 
 	switch (option) {
-           case USBASP_ISP_SCK_6000:    // 6.0 MHz
-    		sck_spcr = (1 << SPE) | (1 << MSTR);
+/*           case USBASP_ISP_SCK_6000:    // 6.0 MHz
+   		sck_spcr = (1 << SPE) | (1 << MSTR);
     		sck_spsr = (1 << SPI2X); // Удвоение скорости
     		break;
-
+*/
 	   case USBASP_ISP_SCK_3000:
 		/* enable SPI, master, 3MHz, XTAL/4 */
 		sck_spcr = (1 << SPE) | (1 << MSTR);
 		sck_spsr = 0;       	
     	        break;
     	   
-    	   case USBASP_ISP_SCK_1500:
+	    case USBASP_ISP_SCK_2000:  // 2.0 MHz = 12MHz / 6
+	    	sck_spcr = (1 << SPE) | (1 << MSTR) | (1 << SPR0);
+		sck_spsr = (1 << SPI2X);
+		break;
+
+	  case USBASP_ISP_SCK_1500:
         	/* enable SPI, master, 1.5MHz, f_osc/8 (SPR=01, SPI2X=1 for 12MHz) */
         	sck_spcr = (1 << SPE) | (1 << MSTR) | (1 << SPR0);  // SPR1=0, SPR0=1
         	sck_spsr = (1 << SPI2X);     // делитель 8 > 1.5 MHz
         	break;
 
-           case USBASP_ISP_SCK_750:
+    	  case USBASP_ISP_SCK_1000:  // 1.0 MHz = 12MHz / 12
+    		sck_spcr = (1 << SPE) | (1 << MSTR) | (1 << SPR1);
+	    	sck_spsr = (1 << SPI2X);
+    		break;
+
+	   case USBASP_ISP_SCK_750:
         	/* enable SPI, master, 0.75MHz, f_osc/16 (SPR=01, SPI2X=0 for 12MHz) */
         	sck_spcr = (1 << SPE) | (1 << MSTR) | (1 << SPR0);   // SPR1=0, SPR0=1
         	sck_spsr = 0;                // делитель 16 > 0.75 MHz
         	break;
+
+           case USBASP_ISP_SCK_500:   // 500 kHz = 12MHz / 24
+    		sck_spcr = (1 << SPE) | (1 << MSTR) | (1 << SPR0) | (1 << SPR1);
+    		sck_spsr = (1 << SPI2X);
+    		break;
 
     	   case USBASP_ISP_SCK_375:
     	       	/* enable SPI, master, 0.375MHz, f_osc/32 (SPR=10, SPI2X=1 for 12MHz) */
@@ -313,12 +330,15 @@ uchar ispEnterProgrammingMode(void)
 }
 
 void ispUpdateExtended(uint32_t address) {
-    // Быстрая проверка: если адрес вне диапазона, сразу выходим
-    if (address < EXTADDR_BLOCK || address >= FLASH_MAX_BYTES) {
+    // Вычисляем блок динамически
+    uint32_t block_size = EXTADDR_BLOCK;  // 256KB
+    
+    if (address < block_size || address >= FLASH_MAX_BYTES) {
         return;
     }
     
-    uint8_t curr_hiaddr = (uint8_t)(address >> 17);
+    uint8_t curr_hiaddr = (uint8_t)(address / block_size);
+    
     if (curr_hiaddr == isp_hiaddr) {
         return;
     }
@@ -329,7 +349,6 @@ void ispUpdateExtended(uint32_t address) {
     ispTransmit(isp_hiaddr);
     ispTransmit(0x00);
 }
-
 uchar ispReadFlashRaw(uint32_t address)
 {
     ispTransmit(0x20 | ((address & 1) << 3));

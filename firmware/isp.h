@@ -30,7 +30,7 @@
 // Для поддержки всех AVR нужно правильно определить:
 #define FLASH_MAX_BYTES   (512UL*1024)    // Максимум для USBasp
 #define MAX_EEPROM_SIZE   (64UL * 1024)   // 64KB - максимум 16-битного адреса
-#define EXTADDR_BLOCK     (0x40000UL)     // 0x20000UL=128K граница и для ATmega2560 (256KB = 0x40000).
+#define EXTADDR_BLOCK     (0x20000UL)     // 0x20000UL=128K граница и для ATmega2560 (256KB = 0x40000).
 #define EXTADDR_BLOCKS    (FLASH_MAX_BYTES / EXTADDR_BLOCK)
 
 #define CS_LOW()	ISP_OUT &= ~(1 << ISP_RST); /* RST low */
