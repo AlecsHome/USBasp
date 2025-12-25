@@ -179,29 +179,30 @@ void ispDelay() {
 }
 
 void ispConnect() {
+    /* all ISP pins are inputs before */
+    /* now set output pins */
+    ISP_DDR |= (1 << ISP_RST) | (1 << ISP_SCK) | (1 << ISP_MOSI);
+    ISP_DDR &= ~(1 << ISP_MISO); // MISO всегда вход
 
-	/* all ISP pins are inputs before */
-	/* now set output pins */
-	ISP_DDR |= (1 << ISP_RST) | (1 << ISP_SCK) | (1 << ISP_MOSI);
-        ISP_DDR &= ~(1 << ISP_MISO); // MISO всегда вход
+    /* reset device */
+    ISP_OUT &= ~(1 << ISP_RST); /* RST low */
+    ISP_OUT &= ~(1 << ISP_SCK); /* SCK low */
 
-	/* reset device */
-	ISP_OUT &= ~(1 << ISP_RST); /* RST low */
-	ISP_OUT &= ~(1 << ISP_SCK); /* SCK low */
+    /* positive reset pulse > 2 SCK (target) */
+    clockWait(1); /* ~320 µs */
+    ISP_OUT |= (1 << ISP_RST); /* RST high */
+    clockWait(1);           /* 320us */
+    ISP_OUT &= ~(1 << ISP_RST);/* RST low */
 
-	/* positive reset pulse > 2 SCK (target) */
-	clockWait(1); /* ~320 µs */
-	ISP_OUT |= (1 << ISP_RST); /* RST high */
-	clockWait(1);		   /* 320us */
-	ISP_OUT &= ~(1 << ISP_RST);/* RST low */
-
-	if (ispTransmit == (uchar (*)(uchar))ispTransmit_hw) {
-
-	spiHWenable();
-	}
-	
-	/* Initial extended address value */
-        isp_hiaddr = 0xff;  /* ensure that even 0x00000 causes a write of the extended address byte */
+    if (ispTransmit == (uchar (*)(uchar))ispTransmit_hw) {
+        spiHWenable();
+    }
+    
+    /* Initial extended address value */
+    isp_hiaddr = 0xff;  /* ensure that even 0x00000 causes a write of the extended address byte */
+    
+    // Устанавливаем флаг подключения
+    is_connected = 1;
 }
 
 void isp25Connect() {
@@ -217,12 +218,14 @@ void isp25Connect() {
 }
 
 void ispDisconnect() {
-
-	/* set all ISP pins inputs */
-	ISP_DDR &= ~((1 << ISP_RST) | (1 << ISP_SCK) | (1 << ISP_MOSI));
-	/* switch pullups off */
-	ISP_OUT &= ~((1 << ISP_RST) | (1 << ISP_SCK) | (1 << ISP_MOSI));
-        prog_sck = USBASP_ISP_SCK_AUTO;	
+    /* set all ISP pins inputs */
+    ISP_DDR &= ~((1 << ISP_RST) | (1 << ISP_SCK) | (1 << ISP_MOSI));
+    /* switch pullups off */
+    ISP_OUT &= ~((1 << ISP_RST) | (1 << ISP_SCK) | (1 << ISP_MOSI));
+    prog_sck = USBASP_ISP_SCK_AUTO;
+    
+    // Сбрасываем флаг подключения
+    is_connected = 0;
 }
 
 uchar ispTransmit_sw(uchar send_byte)
@@ -258,11 +261,12 @@ uchar ispTransmit_sw(uchar send_byte)
 
 uchar ispTransmit_hw(uchar send_byte) {
 
-	SPDR = send_byte;
-
-	while (!(SPSR & (1 << SPIF)));
-
-	return SPDR;
+    SPDR = send_byte;
+    
+    while (!(SPSR & (1 << SPIF)));
+    
+    return SPDR;  // Это и есть полученный байт
+    
 }
 
 /* Попытка войти в режим программирования с заданной скоростью */

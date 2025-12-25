@@ -1,7 +1,21 @@
-﻿#include <avr/io.h>
+﻿/*
+ * USBasp - USB in-circuit programmer for Atmel AVR controllers
+ *
+ * Thomas Fischl <tfischl@gmx.de>
+ *
+ * License........: GNU GPL v2 (see Readme.txt)
+ * Target.........: ATMega8 at 12 MHz
+ * Creation Date..: 2005-02-20
+ * Last change....: 2009-02-28
+ *
+ * PC2 SCK speed option.
+ * GND  -> slow (8khz SCK),
+ * open -> software set speed (default is 375kHz SCK)
+ */
+
+#include <avr/io.h>
 #include <avr/interrupt.h>
 #include <avr/pgmspace.h>
-
 #include "usbasp.h"
 #include "usbdrv.h"
 #include "isp.h"
@@ -11,9 +25,16 @@
 #include "tpi_defs.h"
 #include "I2c.h"
 #include "microwire.h"
+#include <stddef.h>
 
 /* Макрос для быстрой проверки минимального значения */
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
+//#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+// Правильный макрос MIN для разных типов
+#define MIN(a, b) ({ \
+    __typeof__(a) _a = (a); \
+    __typeof__(b) _b = (b); \
+    _a < _b ? _a : _b; \
+})
 
 // --- Перемещаем ОПРЕДЕЛЕНИЯ переменных ВВЕРХ ---
 static uchar replyBuffer[8];
@@ -32,6 +53,8 @@ static uint8_t mw_opcode;    // И эту строку
 static unsigned int prog_pagesize;
 extern uchar sck_sw_delay;
 static uint8_t  rc;
+static uint8_t i2c_dev_addr = 0xFF;   // последний заданный адрес
+uchar is_connected = 0;
 
 /* Глобальные переменные для I2C */
 static uint8_t i2c_eeprom_mode = 0;
@@ -39,8 +62,8 @@ static uint8_t i2c_eeprom_device_addr = 0xA0;
 static uint8_t i2c_eeprom_addr_size = 0;
 static uint8_t i2c_stop_aw = 1;
 static uint8_t prog_address_sent = 0;  // Флаг отправки адреса
-static uint8_t i2c_dev_addr = 0xFF;   // последний заданный адрес
 
+/* -------------------------------------------------------------------------------- */
 static void setupTransfer(uint8_t *data, uint8_t new_state) {
     prog_address = (data[3] << 8) | data[2];
     prog_nbytes  = (data[7] << 8) | data[6];
@@ -55,9 +78,12 @@ static void setupSPIState(uint8_t mode, uint8_t *data) {
 }
 
 static void setupWriteOperation(uint8_t *data, uint8_t new_state,
-                                uint8_t pagesize, uint8_t flags) {
-    if (!prog_address_newmode)
+                                uint8_t pagesize, uint8_t flags)
+{
+    if (!prog_address_newmode) {
+        /* и для Flash и для EEPROM достаточно 16-битного адреса */
         prog_address = (data[3] << 8) | data[2];
+    }
 
     prog_pagesize = pagesize;
     prog_blockflags = flags;
@@ -91,7 +117,6 @@ static void setupI2COperation(uint8_t *data, uint8_t new_state, usbMsgLen_t *len
         }
         prog_address = memory_address;
     }
-
     prog_nbytes = (data[7] << 8) | data[6];
     prog_state  = new_state;
     *len_out    = USB_NO_MSG;
@@ -100,7 +125,7 @@ static void setupI2COperation(uint8_t *data, uint8_t new_state, usbMsgLen_t *len
 /* -------------------------------------------------------------------------------- */
 usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 
-   usbMsgLen_t len = 0;
+ usbMsgLen_t len = 0;
 
 	if (data[1] == USBASP_FUNC_CONNECT) {
 
@@ -119,7 +144,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
            replyBuffer[0] = rc;
 	   len = 1;
 								
-//spi --------------------------------------------------------------
+//spi ----------------------------------------------------------------------------------------
 	} else if (data[1] == USBASP_FUNC_SPI_CONNECT) {
 		ispSetSCKOption(prog_sck);
 		ledRedOn();
@@ -132,9 +157,8 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 	} else if (data[1] == USBASP_FUNC_SPI_WRITE) {
     		setupSPIState(PROG_STATE_SPI_WRITE, data);
     		len = USB_NO_MSG;
-
-//i2c 24xx ---------------------------------------------------------
-
+    
+//i2c 24xx ------------------------------------------------------------------------------------
 
 	} else if (data[1] == USBASP_FUNC_I2C_INIT) {
     		ledRedOn();
@@ -169,7 +193,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
     		replyBuffer[0]  = 0;
     		len = 1;
 
-//microwire 93xx ---------------------------------------------------------		
+//microwire 93xx ---------------------------------------------------------------------------------------------
 
 	} else if (data[1] == USBASP_FUNC_MW_WRITE) {
     		setupMicrowireOperation(data, PROG_STATE_MW_WRITE);
@@ -201,12 +225,11 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
         	len = (n > 4) ? 4 : n;
         	// replyBuffer уже заполнен
 
-//------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------
 	
 	} else if (data[1] == USBASP_FUNC_DISCONNECT) {
 		ispDisconnect();
 		ledGreenOff();
-		ledRedOff();
 
 	} else if (data[1] == USBASP_FUNC_TRANSMIT) {
 		replyBuffer[0] = ispTransmit(data[2]);
@@ -238,15 +261,24 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
     		len = USB_NO_MSG;
 
 	} else if (data[1] == USBASP_FUNC_SETLONGADDRESS) {  // Функция 9
-		// data[4], data[5] - младшие 16 бит (wValue)
-	    	// data[2], data[3] - старшие 16 бит (wIndex)
-		 uint32_t addr = ((uint32_t)data[3] << 24) | ((uint32_t)data[2] << 16) |
-                   ((uint32_t)data[5] << 8) | data[4];
+    		/* 
+     		* Стандартный формат USBasp:
+     		* data[4], data[5] - wValue (младшие 16 бит)
+     		* data[2], data[3] - wIndex (старшие 16 бит)
+     		*/
+    
+    		uint32_t addr = ((uint32_t)data[3] << 24) |  // Старший байт wIndex
+                    ((uint32_t)data[2] << 16) |  // Младший байт wIndex  
+                    ((uint32_t)data[5] << 8)  |  // Старший байт wValue
+                     (uint32_t)data[4];          // Младший байт wValue
     
     		// Вызываем вашу функцию extended addressing
-    		ispUpdateExtended(addr);
+    		// Ваша функция ожидает адреса ≥ 128KB
+    		if (addr >= 0x20000) {  // 128KB
+        	  ispUpdateExtended(addr);
+    		}
     
-	    	replyBuffer[0] = 0;  // Успех
+    		replyBuffer[0] = 0;  // Успех
     		len = 1;
 
 	} else if (data[1] == USBASP_FUNC_SETISPSCK) {
@@ -263,9 +295,9 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
         	replyBuffer[4] = isp_hiaddr;
         	replyBuffer[5] = prog_state;
         	len = 6;
-    
-//------------------------------------------------------------------------
-       
+
+//------------------------------------------------------------------------------------------
+
 	} else if (data[1] == USBASP_FUNC_TPI_CONNECT) {
 		tpi_dly_cnt = data[2] | (data[3] << 8);
 
@@ -317,7 +349,9 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 	} else if (data[1] == USBASP_FUNC_TPI_WRITEBLOCK) {
 		setupTransfer(data, PROG_STATE_TPI_WRITE);
 		len = USB_NO_MSG; /* multiple out */
-	
+
+//------------------------------------------------------------------------------------------
+
 	} else if (data[1] == USBASP_FUNC_GETCAPABILITIES) {
 		replyBuffer[0] = USBASP_CAP_0_TPI | USBASP_CAP_0_I2C | USBASP_CAP_0_MW;
 		replyBuffer[1] = USBASP_CAP_1_SCK_AUTO | USBASP_CAP_1_HW_SCK;
@@ -327,9 +361,9 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
                  USBASP_CAP_3_EXTENDED_ADDR | USBASP_CAP_3MHZ;
 		len = 4;
      	}
-	usbMsgPtr = replyBuffer;
 
-	return len;
+    usbMsgPtr = replyBuffer;
+   return len;
 }
 
 uchar usbFunctionRead(uchar *data, uchar len)
@@ -433,7 +467,6 @@ uchar usbFunctionRead(uchar *data, uchar len)
         }
         goto exit_success;
     }
-
 	/* ---------- ГИБРИДНЫЙ ВАРИАНТ - лучший компромисс ---------- */
 	if (prog_state == PROG_STATE_READFLASH) {
     
@@ -682,73 +715,54 @@ uchar usbFunctionWrite(uchar *data, uchar len)
  
   exit:
     ledGreenOff();
-    ledRedOff();
+    ledRedOn();
     return retVal;
 }
 
-void init_frequency_generator(void) {
-    // Сброс таймера1
-    TCCR1A = 0;
-    TCCR1B = 0;
-    
-       // Установить режим CTC
-    TCCR1B |= (1 << WGM12);
-    
-    // Установить предделитель на 8
-    TCCR1B |= (1 << CS11);
-    
-    // Установить значение для сравнения
-    // Для 1 МГц с 16 МГц тактовой частотой: 16 МГц / 8 / 2 = 1000
-    OCR1A = 1000; 
-    
-    // Включить выход на OC1A (PB1)
-    TCCR1A |= (1 << COM1A0);
-
-}
 int main(void) {
+
     /* no pullups on USB and ISP pins */
     PORTD = 0;
-
-    /* --- USB D+ (PD2) и D- (PD7) --- */
-    PORTD &= ~((1 << PD2) | (1 << PD7)); // D+ и D- = 0
-    DDRD  |= (1 << PD2) | (1 << PD7);    // выходы, low
-    _delay_ms(50);                       // ?10 мс (USB 2.0 spec)
-    DDRD  &= ~((1 << PD2) | (1 << PD7)); // возвращаем во входы
-
-    // Теперь настраиваем порт B: все входы, кроме PB1
-    DDRB = 0;   // все пины порта B как входы
-    DDRB |= (1 << PB1);   // PB1 как выход
+    PORTB = 0;
+    
+    /* Output SE0 for USB reset */
+    /* aleh: i.e. both D+ and D- should be low. */
+    PORTB &= ~((1 << PB1) | (1 << PB0)); // D+ и D- = 0
+    DDRB |= (1 << PB1) | (1 << PB0); 	 // выходы, low	
+    /* aleh: there was a delay loop here instead which probably would still work, I've put this when was debugging. */
+    _delay_ms(63);           // >10 мс (USB 2.0 spec)
+    DDRB = 0;                // возвращаем во входы
 
     /* Инициализация порта C: светодиоды и подтяжки для входов */
     DDRC = (1 << PC0) | (1 << PC1);  // Только PC0 и PC1 как выходы
     DDRC &= ~(1 << PC2);
+    //   PORTC = (1 << PC0) | (1 << PC1); // Светодиоды выключены (общий анод)
     // Включим подтяжки для остальных пинов, включая PC2
     PORTC |= (1 << PC2) | (1 << PC3) | (1 << PC4) | (1 << PC5);
-
+   
     /* ----------- индикация ----------- */
-    ledRedOn();
-    _delay_ms(100);
-    ledRedOff();
-    ledGreenOn();
-    _delay_ms(100);
-    ledGreenOff();
 
+    ledRedOn();
+    _delay_ms(127);
+    ledRedOff();
+    ledGreenOn();  
+    _delay_ms(127);  
+    ledGreenOff();
+    ledRedOn();
+   
     /* ----------- USB ----------- */
     /* init timer */
     clockInit();
-
-    /* Инициализация генератора частоты */
-    init_frequency_generator();
-
+    
     /* main event loop */
     usbInit();
 
     sei();
 
-    for (;;) {
+  for (;;) {
+
         usbPoll();
+
     }
     return 0;
 }
-
-

@@ -87,7 +87,7 @@ uchar ispReadFlashRaw(uint32_t address);
 void ispUpdateExtended(uint32_t address);
 
 extern uint8_t last_success_speed; // объ€вление, а не определение
-
+extern uchar is_connected;
 extern uchar isp_hiaddr;
 
 #endif /* __isp_h_included__ */
