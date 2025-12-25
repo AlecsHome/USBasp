@@ -11,7 +11,6 @@
 #ifndef USBASP_H_
 #define USBASP_H_
 
-/* USB function call identifiers */
 #define USBASP_FUNC_CONNECT     	1
 #define USBASP_FUNC_DISCONNECT  	2
 #define USBASP_FUNC_TRANSMIT    	3
@@ -31,27 +30,24 @@
 #define USBASP_FUNC_TPI_WRITEBLOCK   	16
 
 #define USBASP_FUNC_GETISPSCK        	17
-//#define USBASP_FUNC_READ_SIGNATURE      18
-#define USBASP_FUNC_GETCAPABILITIES     127
 
 #define USBASP_FUNC_SPI_CONNECT		20
 #define USBASP_FUNC_SPI_READ  		21
 #define USBASP_FUNC_SPI_WRITE		22
 
-#define USBASP_FUNC_I2C_INIT		30
-#define USBASP_FUNC_I2C_START 		31
-#define USBASP_FUNC_I2C_STOP 		32
-#define USBASP_FUNC_I2C_ACK 		33
-#define USBASP_FUNC_I2C_WRITEBYTE	34
-#define USBASP_FUNC_I2C_READBYTE	35
-#define USBASP_FUNC_I2C_READ 		36
-#define USBASP_FUNC_I2C_WRITE		37
+#define USBASP_FUNC_I2C_INIT         	30
+#define USBASP_FUNC_I2C_READ     	31   // или какой у вас реальный номер
+#define USBASP_FUNC_I2C_WRITE    	32   // или какой у вас реальный номер
+#define USBASP_FUNC_I2C_READ_BYTE       33
+#define USBASP_FUNC_I2C_WRITE_BYTE      34
+#define USBASP_FUNC_I2C_SETDEVICE       35
 
 #define USBASP_FUNC_MW_TRANSMIT 	40
 #define USBASP_FUNC_MW_READ		42
 #define USBASP_FUNC_MW_WRITE		43
 #define USBASP_FUNC_MW_BUSY		44
 #define USBASP_FUNC_MW_GETADRLEN 	45
+#define USBASP_FUNC_GETCAPABILITIES     127
 
 /* USBASP capabilities */
 // Байт 0: Основные возможности
@@ -73,6 +69,8 @@
 #define USBASP_CAP_3_FUSES      0x04  // Поддержка чтения/записи fuse-битов
 #define USBASP_CAP_3_LOCKBITS   0x08  // Поддержка чтения/записи lock-битов
 #define USBASP_CAP_3_EXTENDED_ADDR 0x80
+
+#define USBASP_CAP_3MHZ         0x02  /* Поддержка 3 МГц SCK */
 
 /* programming state */
 #define PROG_STATE_IDLE         0
@@ -111,7 +109,6 @@
 #define USBASP_ISP_SCK_750    	11  /* 750 kHz   */
 #define USBASP_ISP_SCK_1500   	12  /* 1.5 MHz   */
 #define USBASP_ISP_SCK_3000   	13  /* 3 MHz   */
-#define USBASP_ISP_SCK_6000   	14  /* 6 MHz   */
 
 /* macros for gpio functions */
 #define ledRedOff()    PORTC |=  (1 << PC0)   // анод через резистор к +5V
