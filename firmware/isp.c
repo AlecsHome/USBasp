@@ -201,8 +201,6 @@ void ispConnect() {
     /* Initial extended address value */
     isp_hiaddr = 0xff;  /* ensure that even 0x00000 causes a write of the extended address byte */
     
-    // Устанавливаем флаг подключения
-    is_connected = 1;
 }
 
 void isp25Connect() {
@@ -222,10 +220,9 @@ void ispDisconnect() {
     ISP_DDR &= ~((1 << ISP_RST) | (1 << ISP_SCK) | (1 << ISP_MOSI));
     /* switch pullups off */
     ISP_OUT &= ~((1 << ISP_RST) | (1 << ISP_SCK) | (1 << ISP_MOSI));
+    
     prog_sck = USBASP_ISP_SCK_AUTO;
     
-    // Сбрасываем флаг подключения
-    is_connected = 0;
 }
 
 uchar ispTransmit_sw(uchar send_byte)

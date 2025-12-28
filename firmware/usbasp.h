@@ -1,17 +1,8 @@
-/*
- * usbasp.c - part of USBasp
- *
- * Autor..........: Thomas Fischl <tfischl@gmx.de>
- * Description....: Definitions and macros for usbasp
- * Licence........: GNU GPL v2 (see Readme.txt)
- * Creation Date..: 2009-02-28
- * Last change....: 2009-02-28
- */
-
-#ifndef USBASP_H_
-#define USBASP_H_
-
 /* USB function call identifiers */
+#ifndef usbasp_h
+#define usbasp_h
+
+// USB function call identifiers
 #define USBASP_FUNC_CONNECT     	1
 #define USBASP_FUNC_DISCONNECT  	2
 #define USBASP_FUNC_TRANSMIT    	3
@@ -20,7 +11,7 @@
 #define USBASP_FUNC_WRITEFLASH  	6
 #define USBASP_FUNC_READEEPROM  	7
 #define USBASP_FUNC_WRITEEEPROM 	8
-#define USBASP_FUNC_SETLONGADDRESS 	9
+#define USBASP_FUNC_SETLONGADDRESS      9
 #define USBASP_FUNC_SETISPSCK 		10
 
 #define USBASP_FUNC_TPI_CONNECT      	11
@@ -29,77 +20,85 @@
 #define USBASP_FUNC_TPI_RAWWRITE     	14
 #define USBASP_FUNC_TPI_READBLOCK    	15
 #define USBASP_FUNC_TPI_WRITEBLOCK   	16
-
 #define USBASP_FUNC_GETISPSCK        	17
-//#define USBASP_FUNC_READ_SIGNATURE      18
-//#define USBASP_FUNC_READ_CALIBRATION    19
 
-#define USBASP_FUNC_SPI_CONNECT		20
-#define USBASP_FUNC_SPI_READ  		21
-#define USBASP_FUNC_SPI_WRITE		22
+#define USBASP_FUNC_SPI_CONNECT		50
+#define USBASP_FUNC_SPI_READ		51
+#define USBASP_FUNC_SPI_WRITE		52
+#define USBASP_FUNC_SPI_CHIP_ERASE	53
 
-#define USBASP_FUNC_ERASEFLASH    	23    // Flash-only erase
+#define USBASP_FUNC_I2C_INIT         	70
+#define USBASP_FUNC_I2C_READ     	71   // или какой у вас реальный номер
+#define USBASP_FUNC_I2C_WRITE    	72   // или какой у вас реальный номер
+#define USBASP_FUNC_I2C_START           73
+#define USBASP_FUNC_I2C_STOP            74
+#define USBASP_FUNC_I2C_READ_BYTE       75
+#define USBASP_FUNC_I2C_WRITE_BYTE      76
+#define USBASP_FUNC_I2C_SETDEVICE       77
 
-#define USBASP_FUNC_I2C_INIT         	30
-#define USBASP_FUNC_I2C_READ     	31   // или какой у вас реальный номер
-#define USBASP_FUNC_I2C_WRITE    	32   // или какой у вас реальный номер
-#define USBASP_FUNC_I2C_READ_BYTE       33
-#define USBASP_FUNC_I2C_WRITE_BYTE      34
-#define USBASP_FUNC_I2C_SETDEVICE       35
+#define USBASP_FUNC_MW_TRANSMIT 	90
+#define USBASP_FUNC_MW_READ		92
+#define USBASP_FUNC_MW_WRITE		93
+#define USBASP_FUNC_MW_BUSY		94
+#define USBASP_FUNC_MW_GETADRLEN 	95
 
-#define USBASP_FUNC_MW_TRANSMIT 	40
-#define USBASP_FUNC_MW_READ		42
-#define USBASP_FUNC_MW_WRITE		43
-#define USBASP_FUNC_MW_BUSY		44
-#define USBASP_FUNC_MW_GETADRLEN 	45
 #define USBASP_FUNC_GETCAPABILITIES     127
 
-/* USBASP capabilities */
-// Байт 0: Основные возможности
+// USBASP capabilities
+/* Байт 0: Основные возможности (биты 0-7) */
 #define USBASP_CAP_0_TPI        0x01  // Поддержка TPI интерфейса
-//#define USBASP_CAP_0_PDI        0x02  // Поддержка PDI интерфейса
-//#define USBASP_CAP_0_SPI25      0x04  // Поддержка SPI для 25xx памяти
 #define USBASP_CAP_0_I2C        0x08  // Поддержка I2C для 24xx памяти
 #define USBASP_CAP_0_MW         0x10  // Поддержка Microwire для 93xx памяти
 
-// Байт 1: Дополнительные возможности
+/* Байт 1: Дополнительные возможности (биты 8-15) */
 #define USBASP_CAP_1_SCK_AUTO   0x01  // Автоматическое определение SCK
-//#define USBASP_CAP_1_VTARGET    0x02  // Измерение напряжения целевого устройства
-//#define USBASP_CAP_1_FW_UPDATE  0x04  // Возможность обновления прошивки
-#define USBASP_CAP_1_HW_SCK   	0x80   /* бит 7 – аппаратный SCK */
+#define USBASP_CAP_1_HW_SCK     0x80  // Аппаратный SCK (бит 7 байта 1)
 
-// Байт 3: Возможности работы с памятью
-#define USBASP_CAP_3_FLASH      0x01  // Поддержка Flash памяти
-#define USBASP_CAP_3_EEPROM     0x02  // Поддержка EEPROM памяти
-#define USBASP_CAP_3_FUSES      0x04  // Поддержка чтения/записи fuse-битов
-#define USBASP_CAP_3_LOCKBITS   0x08  // Поддержка чтения/записи lock-битов
-#define USBASP_CAP_3_EXTENDED_ADDR 0x80
+/* Байт 2: Резерв/дополнительные возможности (биты 16-23) */
+// Пока не используется
 
-#define USBASP_CAP_3MHZ         0x02  /* Поддержка 3 МГц SCK */
+/* Байт 3: Возможности работы с памятью (биты 24-31) */
+#define USBASP_CAP_3_FLASH      0x01  // Поддержка Flash памяти (бит 24)
+#define USBASP_CAP_3_EEPROM     0x02  // Поддержка EEPROM памяти (бит 25)
+#define USBASP_CAP_3_FUSES      0x04  // Поддержка чтения/записи fuse-битов (бит 26)
+#define USBASP_CAP_3_LOCKBITS   0x08  // Поддержка чтения/записи lock-битов (бит 27)
+#define USBASP_CAP_3_EXTENDED_ADDR 0x80  // Расширенная адресация (бит 31)
 
+/* 3 MHz SCK - специальный флаг из UsbAsp-flash прошивки */
+/* Это бит 24? Нет, нужно проверить оригинальную прошивку UsbAsp-flash */
+/* В оригинале: USBASP_CAP_3MHZ = 0x40 (бит 6 байта 3, т.е. бит 30) */
+#define USBASP_CAP_3MHZ         0x40  // 3 MHz SCK (бит 30, байт 3)
+
+/* Остальные флаги уже должны быть */
 /* programming state */
-#define PROG_STATE_IDLE         0
-#define PROG_STATE_WRITEFLASH   1
-#define PROG_STATE_READFLASH    2
-#define PROG_STATE_READEEPROM   3
-#define PROG_STATE_WRITEEEPROM  4
-#define PROG_STATE_TPI_READ     5
-#define PROG_STATE_TPI_WRITE    6
+#define PROG_STATE_IDLE         	0
+#define PROG_STATE_WRITEFLASH   	1
+#define PROG_STATE_READFLASH    	2
+#define PROG_STATE_READEEPROM   	3
+#define PROG_STATE_WRITEEEPROM  	4
+#define PROG_STATE_TPI_READ     	5
+#define PROG_STATE_TPI_WRITE    	6
 
-#define PROG_STATE_SPI_WRITE	50
-#define PROG_STATE_SPI_READ	51
+#define PROG_STATE_SPI_WRITE		50
+#define PROG_STATE_SPI_READ		51
+#define PROG_STATE_SPI_CHIP_ERASE 	52
 
-#define PROG_STATE_I2C_WRITE	53
-#define PROG_STATE_I2C_READ	54
+#define PROG_STATE_I2C_WRITE		53
+#define PROG_STATE_I2C_READ		54
 
-#define PROG_STATE_MW_READ	57
-#define PROG_STATE_MW_WRITE	58
+#define PROG_STATE_MW_READ		57
+#define PROG_STATE_MW_WRITE		58
 
 /* Block mode flags */
-#define PROG_BLOCKFLAG_FIRST    1
-#define PROG_BLOCKFLAG_LAST     2
+#define PROG_BLOCKFLAG_FIRST    	1
+#define PROG_BLOCKFLAG_LAST     	2
 
-/* ISP SCK speed identifiers */
+
+// Block mode data size
+#define USBASP_READBLOCKSIZE   200
+#define USBASP_WRITEBLOCKSIZE  200
+
+// ISP SCK speed identifiers
 #define USBASP_ISP_SCK_AUTO   	0
 #define USBASP_ISP_SCK_0_5    	1   /* 500 Hz */
 #define USBASP_ISP_SCK_1      	2   /*   1 kHz */
