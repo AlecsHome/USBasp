@@ -1,3 +1,13 @@
+/*
+ * usbasp.c - part of USBasp
+ *
+ * Autor..........: Thomas Fischl <tfischl@gmx.de>
+ * Description....: Definitions and macros for usbasp
+ * Licence........: GNU GPL v2 (see Readme.txt)
+ * Creation Date..: 2009-02-28
+ * Last change....: 2009-02-28
+ */
+
 /* USB function call identifiers */
 #ifndef usbasp_h
 #define usbasp_h
@@ -45,31 +55,20 @@
 #define USBASP_FUNC_GETCAPABILITIES     127
 
 // USBASP capabilities
-/* Байт 0: Основные возможности (биты 0-7) */
-#define USBASP_CAP_0_TPI        0x01  // Поддержка TPI интерфейса
-#define USBASP_CAP_0_I2C        0x08  // Поддержка I2C для 24xx памяти
-#define USBASP_CAP_0_MW         0x10  // Поддержка Microwire для 93xx памяти
+#define USBASP_CAP_0_TPI        	0x01   // бит 0 байта 0
+#define USBASP_CAP_0_I2C        	0x02   // бит 1 байта 0
+#define USBASP_CAP_0_MW         	0x10   // бит 4 байта 0
 
-/* Байт 1: Дополнительные возможности (биты 8-15) */
-#define USBASP_CAP_1_SCK_AUTO   0x01  // Автоматическое определение SCK
-#define USBASP_CAP_1_HW_SCK     0x80  // Аппаратный SCK (бит 7 байта 1)
+#define USBASP_CAP_1_SCK_AUTO   	0x01   // бит 0 байта 1
+#define USBASP_CAP_1_HW_SCK     	0x80   // бит 7 байта 1
 
-/* Байт 2: Резерв/дополнительные возможности (биты 16-23) */
-// Пока не используется
+#define USBASP_CAP_3_FLASH      	0x01  // Байт 3, бит 0
+#define USBASP_CAP_3_EEPROM     	0x02  // Байт 3, бит 1
+#define USBASP_CAP_3_FUSES      	0x04  // Байт 3, бит 2
+#define USBASP_CAP_3_LOCKBITS   	0x08  // Байт 3, бит 3
+#define USBASP_CAP_3_EXTENDED_ADDR 	0x80  // Байт 3, бит 7
+#define USBASP_CAP_3MHZ 	      	0x40  // Байт 3, бит 6
 
-/* Байт 3: Возможности работы с памятью (биты 24-31) */
-#define USBASP_CAP_3_FLASH      0x01  // Поддержка Flash памяти (бит 24)
-#define USBASP_CAP_3_EEPROM     0x02  // Поддержка EEPROM памяти (бит 25)
-#define USBASP_CAP_3_FUSES      0x04  // Поддержка чтения/записи fuse-битов (бит 26)
-#define USBASP_CAP_3_LOCKBITS   0x08  // Поддержка чтения/записи lock-битов (бит 27)
-#define USBASP_CAP_3_EXTENDED_ADDR 0x80  // Расширенная адресация (бит 31)
-
-/* 3 MHz SCK - специальный флаг из UsbAsp-flash прошивки */
-/* Это бит 24? Нет, нужно проверить оригинальную прошивку UsbAsp-flash */
-/* В оригинале: USBASP_CAP_3MHZ = 0x40 (бит 6 байта 3, т.е. бит 30) */
-#define USBASP_CAP_3MHZ         0x40  // 3 MHz SCK (бит 30, байт 3)
-
-/* Остальные флаги уже должны быть */
 /* programming state */
 #define PROG_STATE_IDLE         	0
 #define PROG_STATE_WRITEFLASH   	1
@@ -92,7 +91,6 @@
 /* Block mode flags */
 #define PROG_BLOCKFLAG_FIRST    	1
 #define PROG_BLOCKFLAG_LAST     	2
-
 
 // Block mode data size
 #define USBASP_READBLOCKSIZE   200

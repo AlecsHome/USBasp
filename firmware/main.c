@@ -156,8 +156,8 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 	} else if (data[1] == USBASP_FUNC_SPI_WRITE) {
     		setupSPIState(PROG_STATE_SPI_WRITE, data);
     		len = USB_NO_MSG;
-
-	} else if (data[1] == USBASP_FUNC_SPI_CHIP_ERASE) {
+    	
+    	} else if (data[1] == USBASP_FUNC_SPI_CHIP_ERASE) {
     		// НОВАЯ ФУНКЦИЯ: стирание только Flash
     		setupSPIState(PROG_STATE_SPI_CHIP_ERASE, data);
 		len = USB_NO_MSG;    
@@ -370,22 +370,13 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 		len = USB_NO_MSG; /* multiple out */
 
 //------------------------------------------------------------------------------------------
-
 	} else if (data[1] == USBASP_FUNC_GETCAPABILITIES) {
-    		// Байт 0: Основные возможности
-    		replyBuffer[0] = USBASP_CAP_0_TPI | USBASP_CAP_0_I2C | USBASP_CAP_0_MW;
-    
-    		// Байт 1: Дополнительные возможности
-	    	replyBuffer[1] = USBASP_CAP_1_SCK_AUTO | USBASP_CAP_1_HW_SCK;
-    
-    		// Байт 2: Резерв (0)
-    		replyBuffer[2] = 0;
-    
-    		// Байт 3: Возможности работы с памятью
-    		replyBuffer[3] = USBASP_CAP_3_FLASH | USBASP_CAP_3_EEPROM | 
-                     		 USBASP_CAP_3_FUSES | USBASP_CAP_3_LOCKBITS |
-                     		 USBASP_CAP_3_EXTENDED_ADDR | USBASP_CAP_3MHZ;
-    
+		replyBuffer[0] = USBASP_CAP_0_TPI | USBASP_CAP_0_I2C | USBASP_CAP_0_MW;
+		replyBuffer[1] = USBASP_CAP_1_SCK_AUTO | USBASP_CAP_1_HW_SCK;
+		replyBuffer[2] = 0;
+		replyBuffer[3] = USBASP_CAP_3_FLASH | USBASP_CAP_3_EEPROM |
+                 		 USBASP_CAP_3_FUSES | USBASP_CAP_3_LOCKBITS |
+                 		 USBASP_CAP_3_EXTENDED_ADDR | USBASP_CAP_3MHZ;          // 0x40 – никаких сдвигов    
     		len = 4;
 	}
 
