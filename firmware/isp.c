@@ -20,12 +20,12 @@
 extern uchar prog_sck;
 uchar (*ispTransmit)(uchar) = NULL;
 
-uint8_t last_success_speed = USBASP_ISP_SCK_AUTO;
+uint8_t last_success_speed = USBASP_ISP_SCK_1500;
 
 // Явный массив скоростей от САМОЙ БЫСТРОЙ к САМОЙ МЕДЛЕННОЙ
 // Порядок ВАЖЕН - от быстрой к медленной!
 static const uchar isp_retry_speeds[] PROGMEM = {
-//  USBASP_ISP_SCK_6000,   // 6.0 MHz - если поддерживается
+
     USBASP_ISP_SCK_3000,   // 3.0 MHz
     USBASP_ISP_SCK_2000,   // 2.0 MHz - добавить
     USBASP_ISP_SCK_1500,   // 1.5 MHz
@@ -63,10 +63,17 @@ static inline void spiHWdisable() {
 }
 
 void ispSetSCKOption(uchar option) {
-   // Всегда сбрасываем состояние SPI перед изменением скорости
-    SPCR = 0;
-	if (option == USBASP_ISP_SCK_AUTO)
- 		option = USBASP_ISP_SCK_3000;  // Значение по умолчанию для авто-режима
+    // Если option = AUTO, используем last_success или значение по умолчанию
+    if (option == USBASP_ISP_SCK_AUTO) {
+        if (last_success_speed != USBASP_ISP_SCK_AUTO) {
+            option = last_success_speed;  // Используем последнюю успешную
+        } else {
+            option = USBASP_ISP_SCK_3000;  // Значение по умолчанию
+        }
+    }
+    
+    // Сохраняем оригинальное значение для GETISPSCK
+     prog_sck = option;  // Теперь это реальная скорость, а не AUTO
 
 	if (option >= USBASP_ISP_SCK_93_75) {
 		ispTransmit = (uchar (*)(uchar))ispTransmit_hw;
@@ -74,11 +81,7 @@ void ispSetSCKOption(uchar option) {
 		sck_sw_delay = 1;	/* force RST#/SCK pulse for 320us */
 
 	switch (option) {
-/*           case USBASP_ISP_SCK_6000:    // 6.0 MHz
-   		sck_spcr = (1 << SPE) | (1 << MSTR);
-    		sck_spsr = (1 << SPI2X); // Удвоение скорости
-    		break;
-*/
+
 	   case USBASP_ISP_SCK_3000:
 		/* enable SPI, master, 3MHz, XTAL/4 */
 		sck_spcr = (1 << SPE) | (1 << MSTR);
@@ -294,28 +297,27 @@ static uchar tryEnterProgMode(uchar speed)
     return 1; /* не удалось */
 }
 
-uchar ispEnterProgrammingMode(void)
-{
+uchar ispEnterProgrammingMode(void) {
     uchar rc;
-
-       /* 1. Сохранённая скорость - БЫСТРЫЙ ПУТЬ */
-	if (last_success_speed != USBASP_ISP_SCK_AUTO) {
-    	rc = tryEnterProgMode(last_success_speed); /* уже содержит адаптивные тайминги */
-     	if (rc == 0) {
-          prog_sck = last_success_speed;
-          return 0;
-    	 }
-    	last_success_speed = USBASP_ISP_SCK_AUTO;
-	}
-
-    /* 2. Ручная скорость (-B) */
-    if (prog_sck != USBASP_ISP_SCK_AUTO) {
-        return tryEnterProgMode(prog_sck);
+    
+    // 1. Если пользователь явно задал скорость - используем её
+    if (user_speed_requested) {
+        rc = tryEnterProgMode(prog_sck);
+        if (rc == 0) {
+            last_success_speed = prog_sck;
+            return 0;
+        }
+        return 1;
     }
-
-    /* 3. Автоподбор - только если не указана явная скорость */
+    
+    // 2. Автоподбор от ВЫСОКОЙ скорости к НИЗКОЙ
+    // Проверьте в вашем коде, как определена последовательность ISP_SPEED_CNT
     for (uchar i = 0; i < ISP_SPEED_CNT; i++) {
-        uchar speed = GET_SPEED(i);
+        uchar speed = GET_SPEED(i);  // Должно быть от 3 MHz к 500 Hz
+        
+        // Пропускаем если это была last_success_speed (уже пробовали)
+        if (speed == last_success_speed) continue;
+        
         rc = tryEnterProgMode(speed);
         if (rc == 0) {
             prog_sck = speed;
@@ -323,10 +325,7 @@ uchar ispEnterProgrammingMode(void)
             return 0;
         }
     }
-
-    /* ничего не подошло */
-    prog_sck = USBASP_ISP_SCK_AUTO;
-    ispSetSCKOption(USBASP_ISP_SCK_375);
+    
     return 1;
 }
 

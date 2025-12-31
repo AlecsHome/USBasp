@@ -54,6 +54,7 @@ static unsigned int prog_pagesize;
 extern uchar sck_sw_delay;
 static uint8_t  rc;
 static uint8_t i2c_dev_addr = 0xFF;   // последний заданный адрес
+uint8_t user_speed_requested = 0;  // 0 = auto, 1 = пользователь задал
 
 /* Глобальные переменные для I2C */
 static uint8_t i2c_eeprom_mode = 0;
@@ -301,19 +302,23 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
     		len = 1;
 
 	} else if (data[1] == USBASP_FUNC_SETISPSCK) {
-		/* set sck option */
-		prog_sck = data[2];
-		replyBuffer[0] = 0;
-		len = 1;
+    	        prog_sck = data[2];
+    		 if (prog_sck == USBASP_ISP_SCK_AUTO) {
+        	  user_speed_requested = 0;  // Пользователь выбрал AUTO
+    		 } else {
+        	  user_speed_requested = 1;  // Пользователь явно задал скорость
+    		 }
+    		replyBuffer[0] = 0;
+    		len = 1;
 
-    	} else if (data[1] == USBASP_FUNC_GETISPSCK) {
-        	replyBuffer[0] = 0;
-        	replyBuffer[1] = prog_sck;
-        	replyBuffer[2] = last_success_speed;
-        	replyBuffer[3] = sck_sw_delay;
-        	replyBuffer[4] = isp_hiaddr;
-        	replyBuffer[5] = prog_state;
-        	len = 6;
+	} else if (data[1] == USBASP_FUNC_GETISPSCK) {
+    		replyBuffer[0] = 0;
+    		replyBuffer[1] = prog_sck;           // текущая установленная скорость
+    		replyBuffer[2] = last_success_speed; // предыдущая успешная скорость
+    		replyBuffer[3] = sck_sw_delay;
+    		replyBuffer[4] = isp_hiaddr;
+    		replyBuffer[5] = prog_state;
+    		len = 6;
 
 //------------------------------------------------------------------------------------------
 

@@ -90,6 +90,8 @@ extern uint8_t last_success_speed; // объ€вление, а не определение
 
 extern uchar isp_hiaddr;
 
+extern uint8_t user_speed_requested; 
+
 #endif /* __isp_h_included__ */
 
 #endif
