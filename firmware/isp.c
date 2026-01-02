@@ -20,7 +20,7 @@
 extern uchar prog_sck;
 uchar (*ispTransmit)(uchar) = NULL;
 
-uint8_t last_success_speed = USBASP_ISP_SCK_1500;
+uint8_t last_success_speed = USBASP_ISP_SCK_3000;
 
 // Явный массив скоростей от САМОЙ БЫСТРОЙ к САМОЙ МЕДЛЕННОЙ
 // Порядок ВАЖЕН - от быстрой к медленной!
@@ -349,6 +349,7 @@ void ispUpdateExtended(uint32_t address) {
     ispTransmit(isp_hiaddr);
     ispTransmit(0x00);
 }
+
 uchar ispReadFlashRaw(uint32_t address)
 {
     ispTransmit(0x20 | ((address & 1) << 3));
