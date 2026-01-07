@@ -330,20 +330,23 @@ uchar ispEnterProgrammingMode(void) {
 }
 
 void ispUpdateExtended(uint32_t address) {
-    // Вычисляем блок динамически
-    uint32_t block_size = EXTADDR_BLOCK;  // 256KB
+
+    // Если адрес < 64KB, extended адрес не нужен
+    if (address < 0x10000) {
+        return;
+    }
+    // Вычисляем новый hiaddr (биты 17:16 адреса)
+    // address >> 17 = деление на 128КБ (0x20000)
+    uint8_t new_hi = (uint8_t)(address >> 17);
     
-    if (address < block_size || address >= FLASH_MAX_BYTES) {
+    // Если не изменилось - ничего не делаем
+    if (new_hi == isp_hiaddr) {
         return;
     }
     
-    uint8_t curr_hiaddr = (uint8_t)(address / block_size);
+    isp_hiaddr = new_hi;
     
-    if (curr_hiaddr == isp_hiaddr) {
-        return;
-    }
-    
-    isp_hiaddr = curr_hiaddr;
+    // Отправляем команду SETLONGADDRESS (0x4D)
     ispTransmit(0x4D);
     ispTransmit(0x00);
     ispTransmit(isp_hiaddr);

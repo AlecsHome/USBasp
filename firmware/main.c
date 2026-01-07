@@ -26,6 +26,7 @@
 #include "I2c.h"
 #include "microwire.h"
 #include <stddef.h>
+#include <string.h>
 
 /* Макрос для быстрой проверки минимального значения */
 //#define MIN(a, b) (((a) < (b)) ? (a) : (b))
@@ -470,8 +471,8 @@ uchar usbFunctionRead(uchar *data, uchar len)
 	    return 0; // ошибка
 	}
 
-    /* MW – без буфера */
-    if (prog_state == PROG_STATE_MW_READ) {
+       /* MW – без буфера */
+       if (prog_state == PROG_STATE_MW_READ) {
         for (uint8_t i = 0; i < len; i++) {
             data[i] = mwReadByte();
             _delay_us(1);   // 1 мкс достаточно для 93С46/56/66
@@ -480,9 +481,10 @@ uchar usbFunctionRead(uchar *data, uchar len)
         if (prog_nbytes == 0) {
             if (mw_cs_lo) mwEnd();   // поднимаем CS
             prog_state = PROG_STATE_IDLE;
+          }
+           goto exit_success;
         }
-        goto exit_success;
-    }
+
 	/* ---------- ГИБРИДНЫЙ ВАРИАНТ - лучший компромисс ---------- */
 	if (prog_state == PROG_STATE_READFLASH) {
     
@@ -563,8 +565,8 @@ uint8_t mwSendDataBlock(uint8_t *buf, uint8_t len)
 
 uchar usbFunctionWrite(uchar *data, uchar len)
 { 
-    uchar i ;
     uchar retVal = 0;
+    uchar i = 0;
 
 	/* быстрая проверка режима */
     if (prog_state == PROG_STATE_IDLE)  return 0xFF;
