@@ -27,10 +27,11 @@
 #define ISP_MISO  PB4
 #define ISP_SCK   PB5
 
-#define FLASH_MAX_BYTES   (512UL*1024)    // Максимум для USBasp - 512KB
+// Для поддержки всех AVR нужно правильно определить:
+#define FLASH_MAX_BYTES   (512UL*1024)    // Максимум для USBasp
 #define MAX_EEPROM_SIZE   (64UL * 1024)   // 64KB - максимум 16-битного адреса
-#define EXTADDR_BLOCK     (0x20000UL)     // 128KB блоки - стандарт для USBasp
-#define EXTADDR_BLOCKS    (FLASH_MAX_BYTES / EXTADDR_BLOCK)  // 4 блока по 128KB
+#define EXTADDR_BLOCK     (0x20000UL)     // 0x20000UL=128K граница и для ATmega2560 (256KB = 0x40000).
+#define EXTADDR_BLOCKS    (FLASH_MAX_BYTES / EXTADDR_BLOCK)
 
 #define CS_LOW()	ISP_OUT &= ~(1 << ISP_RST); /* RST low */
 #define CS_HI()		ISP_OUT |= (1 << ISP_RST); /* RST high */
@@ -60,7 +61,7 @@ uchar ispEnterProgrammingMode();
 uchar ispReadEEPROM(unsigned int address);
 
 /* write byte to flash at given address */
-uchar ispWriteFlash(uint32_t address, uchar data, uchar pollmode); 
+uchar ispWriteFlash(uint32_t address, uchar data, uchar pollmode);
 
 uchar ispFlushPage(uint32_t address);
 
@@ -74,17 +75,16 @@ uchar ispWriteEEPROM(unsigned int address, uchar data);
 uchar (*ispTransmit)(uchar);
 
 /* set SCK speed. call before ispConnect! */
-void ispSetSCKOption(uchar option) ;        
+void ispSetSCKOption(uchar option);
 
 /* load extended address byte */
 void ispLoadExtendedAddressByte(uint32_t address);
 
-/* */
 void spibusy(void);
 
 uchar ispReadFlashRaw(uint32_t address);
 
-void ispUpdateExtended(uint32_t address) ;
+void ispUpdateExtended(uint32_t address);
 
 extern uint8_t last_success_speed; // объявление, а не определение
 

@@ -471,8 +471,8 @@ uchar usbFunctionRead(uchar *data, uchar len)
             if (mw_cs_lo) mwEnd();   // поднимаем CS
             prog_state = PROG_STATE_IDLE;
         }
-        goto exit_success;
-    }
+        	goto exit_success;
+    	}
 
 	/* ---------- ГИБРИДНЫЙ ВАРИАНТ - лучший компромисс ---------- */
 	if (prog_state == PROG_STATE_READFLASH) {
@@ -615,6 +615,7 @@ uchar usbFunctionWrite(uchar *data, uchar len)
         	}
         	goto exit;
     	}
+
 	/* ---------- I2C Write (минималистичная) ---------- */
 	if (prog_state == PROG_STATE_I2C_WRITE) {
     
@@ -795,78 +796,60 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 	    goto exit;
 	}
 
+
     /* Неизвестное состояние */
     retVal = 0xFF;
  
   exit:
     ledGreenOff();
-    ledRedOff();
+    ledRedOn();
     return retVal;
 }
 
-void init_frequency_generator(void) {
-    // Сброс таймера1
-    TCCR1A = 0;
-    TCCR1B = 0;
-    
-       // Установить режим CTC
-    TCCR1B |= (1 << WGM12);
-    
-    // Установить предделитель на 8
-    TCCR1B |= (1 << CS11);
-    
-    // Установить значение для сравнения
-    // Для 1 МГц с 16 МГц тактовой частотой: 16 МГц / 8 / 2 = 1000
-    OCR1A = 1000; 
-    
-    // Включить выход на OC1A (PB1)
-    TCCR1A |= (1 << COM1A0);
-
-}
 int main(void) {
+
     /* no pullups on USB and ISP pins */
     PORTD = 0;
-
-    /* --- USB D+ (PD2) и D- (PD7) --- */
-    PORTD &= ~((1 << PD2) | (1 << PD7)); // D+ и D- = 0
-    DDRD  |= (1 << PD2) | (1 << PD7);    // выходы, low
-    _delay_ms(50);                       // ?10 мс (USB 2.0 spec)
-    DDRD  &= ~((1 << PD2) | (1 << PD7)); // возвращаем во входы
-
-    // Теперь настраиваем порт B: все входы, кроме PB1
-    DDRB = 0;   // все пины порта B как входы
-    DDRB |= (1 << PB1);   // PB1 как выход
+    PORTB = 0;
+    
+    /* Output SE0 for USB reset */
+    /* aleh: i.e. both D+ and D- should be low. */
+    PORTB &= ~((1 << PB1) | (1 << PB0)); // D+ и D- = 0
+    DDRB |= (1 << PB1) | (1 << PB0); 	 // выходы, low	
+    /* aleh: there was a delay loop here instead which probably would still work, I've put this when was debugging. */
+    _delay_ms(63);           // >10 мс (USB 2.0 spec)
+    DDRB = 0;                // возвращаем во входы
 
     /* Инициализация порта C: светодиоды и подтяжки для входов */
     DDRC = (1 << PC0) | (1 << PC1);  // Только PC0 и PC1 как выходы
     DDRC &= ~(1 << PC2);
+    //   PORTC = (1 << PC0) | (1 << PC1); // Светодиоды выключены (общий анод)
     // Включим подтяжки для остальных пинов, включая PC2
     PORTC |= (1 << PC2) | (1 << PC3) | (1 << PC4) | (1 << PC5);
-
+   
     /* ----------- индикация ----------- */
-    ledRedOn();
-    _delay_ms(100);
-    ledRedOff();
-    ledGreenOn();
-    _delay_ms(100);
-    ledGreenOff();
 
+    ledRedOn();
+    _delay_ms(127);
+    ledRedOff();
+    ledGreenOn();  
+    _delay_ms(127);  
+    ledGreenOff();
+    ledRedOn();
+   
     /* ----------- USB ----------- */
     /* init timer */
     clockInit();
-
-    /* Инициализация генератора частоты */
-    init_frequency_generator();
-
+    
     /* main event loop */
     usbInit();
 
     sei();
 
-    for (;;) {
+  for (;;) {
+
         usbPoll();
+
     }
     return 0;
 }
-
-
