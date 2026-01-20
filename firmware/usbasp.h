@@ -80,7 +80,6 @@
 
 #define PROG_STATE_SPI_WRITE		50
 #define PROG_STATE_SPI_READ		51
-#define PROG_STATE_SPI_CHIP_ERASE 	52
 
 #define PROG_STATE_I2C_WRITE		53
 #define PROG_STATE_I2C_READ		54
@@ -89,12 +88,11 @@
 #define PROG_STATE_MW_WRITE		58
 
 /* Block mode flags */
-#define PROG_BLOCKFLAG_FIRST    	1
-#define PROG_BLOCKFLAG_LAST     	2
+//#define PROG_BLOCKFLAG_FIRST    	1
 
 // Block mode data size
-#define USBASP_READBLOCKSIZE   200
-#define USBASP_WRITEBLOCKSIZE  200
+#define USBASP_READBLOCKSIZE   256
+#define USBASP_WRITEBLOCKSIZE  256
 
 // ISP SCK speed identifiers
 #define USBASP_ISP_SCK_AUTO   	0
