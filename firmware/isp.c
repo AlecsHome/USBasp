@@ -48,9 +48,9 @@ static const uchar isp_retry_speeds[] PROGMEM = {
 // Макрос для удобного чтения из массива скоростей
 #define GET_SPEED(idx) pgm_read_byte(&isp_retry_speeds[(idx)])
 
-uchar sck_sw_delay;
-uchar sck_spcr;
-uchar sck_spsr;
+uchar sck_sw_delay = 0;
+uchar sck_spcr = 0;
+uchar sck_spsr = 0;
 uchar isp_hiaddr = 0xFF;   // 0xFF == «ещё не инициализировано»
 
 void spiHWenable() {
@@ -334,23 +334,18 @@ uchar ispEnterProgrammingMode(void) {
     return 1;
 }
 
-void ispUpdateExtended(uint32_t address)
-{
-    if (address < EXTADDR_BLOCK || address >= FLASH_MAX_BYTES)
-        return;
+void ispUpdateExtended(uint32_t address) {
 
-    uint8_t curr_hiaddr = (uint8_t)(address >> 17);
-
-    if (curr_hiaddr == isp_hiaddr)
-        return;
-
-    isp_hiaddr = curr_hiaddr;
-
-    // Отправка команды стандартными вызовами
-    ispTransmit(0x4D);
-    ispTransmit(0x00);
-    ispTransmit(isp_hiaddr);
-    ispTransmit(0x00);
+   if (address < 0x20000UL) return; // < 128KB - не нужно
+   
+    uint8_t block = (uint8_t)(address >> 17);
+    if (block != isp_hiaddr) {
+        isp_hiaddr = block;
+        ispTransmit(0x4D);
+        ispTransmit(0x00);
+        ispTransmit(block);
+        ispTransmit(0x00);
+    }
 }
 
 uchar ispReadFlashRaw(uint32_t address)
@@ -369,46 +364,50 @@ uchar ispReadFlash(uint32_t address)
 
 uchar ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode)
 {
+        
     ispUpdateExtended(address);
 
-    /* ---------- 1. Собственно загрузка байта в буфер страницы ---------- */
+    /* Загрузка байта в буфер страницы */
     ispTransmit(0x40 | ((address & 1) << 3));
     ispTransmit(address >> 9);
     ispTransmit(address >> 1);
     ispTransmit(data);
 
-    /* если страница ещё не полна – выходим сразу */
-    if (!pollmode) return 0;
-
-    /* ---------- 2. Проверка «уже 0xFF» (только для стирания) ---------- */
-    if (data == 0xFF && ispReadFlash(address) == 0xFF) return 0;
+    /* Если страница ещё не полна и не требуется проверка готовности, выходим */
+    if (!pollmode) {
+        return 0;
+    }
+    /* Быстрая проверка "уже готово" */
+    if (ispReadFlash(address) == data) {
+        return 0;
+    }
 
     /* ---------- 3. Poll готовности ---------- */
-    for (uint8_t t = 32; t; --t) {
-        clockWait(t > 24 ? 1 : t > 15 ? 2 : 4);
-        if (ispReadFlash(address) == data) return 0;
+    for (uint8_t t = 10; t; --t) {
+    clockWait(t > 8 ? 1 : t > 6 ? 2 : 4);   // 1,1,2,2,2,4,4,4,4,4
+     if (ispReadFlash(address) == data) return 0;
     }
-    return 1;                 // timeout
+
+  return 1; // Ошибка записи
 }
 
-uchar ispFlushPage(uint32_t address) {
-
+uint8_t ispFlushPage(uint32_t address) {
     ispUpdateExtended(address);
     
+    // Команда программирования страницы
     ispTransmit(0x4C);
     ispTransmit(address >> 9);
     ispTransmit(address >> 1);
     ispTransmit(0);
 
-    /* Всегда проверяем запись */
-    for (uint8_t t = 32; t > 0; t--) {
-        clockWait(t > 24 ? 1 : (t > 15 ? 2 : 4));
-        if (ispReadFlash(address) != 0xFF) {
-            return 0; // УСПЕХ - байт изменился
-        }
+    // Polling вместо фиксированной задержки
+
+    for (uint8_t t = 10; t; --t) {
+    clockWait(t > 8 ? 1 : t > 6 ? 2 : 4);   // 1,1,2,2,2,4,4,4,4,4
+    if (ispReadFlash(address) != 0xFF) return 0;
     }
-    
-    return 1; // Ошибка
+        
+    return 1; // Ошибка: таймаут
 }
 
 uchar ispReadEEPROM(unsigned int address) {

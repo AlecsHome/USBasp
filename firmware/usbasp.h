@@ -35,7 +35,6 @@
 #define USBASP_FUNC_SPI_CONNECT		50
 #define USBASP_FUNC_SPI_READ		51
 #define USBASP_FUNC_SPI_WRITE		52
-#define USBASP_FUNC_SPI_CHIP_ERASE	53
 
 #define USBASP_FUNC_I2C_INIT         	70
 #define USBASP_FUNC_I2C_READ     	71   // или какой у вас реальный номер
@@ -87,12 +86,9 @@
 #define PROG_STATE_MW_READ		57
 #define PROG_STATE_MW_WRITE		58
 
-/* Block mode flags */
-//#define PROG_BLOCKFLAG_FIRST    	1
-
 // Block mode data size
-#define USBASP_READBLOCKSIZE   256
-#define USBASP_WRITEBLOCKSIZE  256
+#define USBASP_READBLOCKSIZE   0xFF
+#define USBASP_WRITEBLOCKSIZE  0xFF
 
 // ISP SCK speed identifiers
 #define USBASP_ISP_SCK_AUTO   	0
