@@ -102,12 +102,9 @@
 #define USBASP_ISP_SCK_93_75  	8   /*  93.75 kHz */
 #define USBASP_ISP_SCK_187_5  	9   /* 187.5  kHz */
 #define USBASP_ISP_SCK_375    	10  /* 375 kHz   */
-#define USBASP_ISP_SCK_500    	11  // 500 kHz
-#define USBASP_ISP_SCK_750    	12  /* 750 kHz   */
-#define USBASP_ISP_SCK_1000   	13  // 1.0 MHz
-#define USBASP_ISP_SCK_1500   	14  /* 1.5 MHz   */
-#define USBASP_ISP_SCK_2000   	15  // 2.0 MHz  
-#define USBASP_ISP_SCK_3000   	16  /* 3 MHz   */
+#define USBASP_ISP_SCK_750    	11  /* 750 kHz   */
+#define USBASP_ISP_SCK_1500   	12  /* 1.5 MHz   */
+#define USBASP_ISP_SCK_3000   	13  /* 3 MHz   */
 
 /* macros for gpio functions */
 #define ledRedOff()    PORTC |=  (1 << PC0)   // анод через резистор к +5V
