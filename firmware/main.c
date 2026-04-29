@@ -395,6 +395,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 
 uchar usbFunctionRead(uchar *data, uchar len)
 {
+    uint8_t i = 0;
     /* Быстрая проверка: если не «читаем» – сразу выход */
     if ((prog_state != PROG_STATE_READFLASH)  &&
         (prog_state != PROG_STATE_READEEPROM) &&
@@ -422,7 +423,7 @@ uchar usbFunctionRead(uchar *data, uchar len)
 
 	    /* SPI – без буфера */
 	    if (prog_state == PROG_STATE_SPI_READ) {
-	        for (uint8_t i = 0; i < len; i++) {
+	        for (i = 0; i < len; i++) {
 	            data[i] = ispTransmit(0);
 	            _delay_us(1);          // 1 мкс между байтами
 	        }
@@ -440,27 +441,23 @@ uchar usbFunctionRead(uchar *data, uchar len)
        	/* ---------- I2C ---------- */
 	if (prog_state == PROG_STATE_I2C_READ) {
 	    uint8_t bytes_to_read = (len < prog_nbytes) ? len : prog_nbytes;
-
-	    for (uint8_t i = 0; i < bytes_to_read; i++) {
+	    for (i = 0; i < bytes_to_read; i++) {
 	        uint8_t last = (i == bytes_to_read - 1);
-	        replyBuffer[i] = i2c_read_byte(last ? I2C_NACK : I2C_ACK);
+        	data[i] = i2c_read_byte(last ? I2C_NACK : I2C_ACK); // <--- ИСПРАВЛЕНО
 	    }
-
-	    prog_nbytes -= bytes_to_read;   // корректное уменьшение
-
-	    if (prog_nbytes == 0) {         // всё прочитали
+	    prog_nbytes -= bytes_to_read;
+	    if (prog_nbytes == 0) {
 	        i2c_stop();
 	        prog_state = PROG_STATE_IDLE;
 	    }
-
-	    len = bytes_to_read;            // сколько реально получили
+	    len = bytes_to_read;
 	    goto exit_success;
 	}	
 
     	/* -------- MW – без буфера ----------------------*/
 	if (prog_state == PROG_STATE_MW_READ) {
     	// Чтение данных
-	    for (uint8_t i = 0; i < len; i++) {
+	    for (i = 0; i < len; i++) {
 	        data[i] = mwReadByte();
 	        _delay_us(1);
 	    }
@@ -493,30 +490,29 @@ uchar usbFunctionRead(uchar *data, uchar len)
 	            }
 	        }
 
-	        data[bytes_read++] = ispReadFlashRaw(addr++);
-	    }
+	        	data[bytes_read++] = ispReadFlashRaw(addr++);
+	    	}
 
-	    prog_address = addr;
-	    prog_nbytes -= bytes_read;
-	    if (prog_nbytes == 0) prog_state = PROG_STATE_IDLE;
+	    	  prog_address = addr;
+		  prog_nbytes -= bytes_read;
+		  if (prog_nbytes == 0) prog_state = PROG_STATE_IDLE;
 
-	    len = bytes_read;
-	    goto exit_success;
+	    	len = bytes_read;
+	     goto exit_success;
 	}
 
 	/* ---------- Чтение EEPROM ---------- */
-	if (prog_state == PROG_STATE_READEEPROM) {
-	        // ИСПРАВЛЕНО: uint16_t i вместо uint8_t i (защита от зависания если len > 255)
-	        for (uint16_t i = 0; i < len; i++) {
-	            // ИСПРАВЛЕНО: Убрано искусственное ограничение 0xFFF
+		if (prog_state == PROG_STATE_READEEPROM) {
+	        // uint8_t i достаточно, так как len имеет тип uint8_t (макс. 64 байта от V-USB)
+	        for (uint8_t i = 0; i < len; i++) {
 	            data[i] = ispReadEEPROM((uint16_t)prog_address);
 	            prog_address++;
-	      	}
+	        }
 	        prog_nbytes -= len;
 	        if (prog_nbytes == 0) {
 	            prog_state = PROG_STATE_IDLE;
 	        }
-	        goto exit_success;
+	   goto exit_success;
 	}
 
   exit_unsupported:
@@ -564,7 +560,7 @@ uchar usbFunctionWrite(uchar *data, uchar len)
     	}
     	/* ---------- SPI ---------- */
     	if (prog_state == PROG_STATE_SPI_WRITE) {
-          for (uint8_t i = 0; i < len; i++) ispTransmit(data[i]);
+          for (i = 0; i < len; i++) ispTransmit(data[i]);
         	prog_nbytes -= len;
           if (prog_nbytes == 0) {
              if (spi_cs_hi) CS_HI();
@@ -577,7 +573,7 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 	if (prog_state == PROG_STATE_I2C_WRITE) {
 	    uint8_t bytes_to_write = (len < prog_nbytes) ? len : prog_nbytes;
 
-	    for (uint8_t i = 0; i < bytes_to_write; i++) {
+	    for (i = 0; i < bytes_to_write; i++) {
 	        i2c_send_byte(data[i]);
 	    }
 

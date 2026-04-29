@@ -71,14 +71,8 @@ uchar ispReadFlash(uint32_t address);
 /* write byte to eeprom at given address */
 uchar ispWriteEEPROM(unsigned int address, uchar data);
 
-/* pointer to sw or hw transmit function */
-uchar (*ispTransmit)(uchar);
-
 /* set SCK speed. call before ispConnect! */
 void ispSetSCKOption(uchar option);
-
-/* load extended address byte */
-void ispLoadExtendedAddressByte(uint32_t address);
 
 void spibusy(void);
 

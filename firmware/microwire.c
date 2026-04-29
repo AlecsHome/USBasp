@@ -35,20 +35,13 @@ void mwBegin(void)
 
 void mwStart(void)
 {
-    // Вернуть оригинальную реализацию без параметра
     ISP_OUT &= ~(1 << ISP_RST);  // CS = 0
     ISP_OUT &= ~(1 << ISP_SCK);  // CLK = 0
     ispDelay();
 
     ISP_OUT |= (1 << ISP_RST);   // CS = 1
-    
-    // send start bit
-    ISP_OUT |= (1 << ISP_MOSI);
     ispDelay();
-    ISP_OUT |= (1 << ISP_SCK);
-    ispDelay();
-    ISP_OUT &= ~(1 << ISP_SCK);
-    ispDelay();
+    // УБРАЛИ ОТПРАВКУ СТАРТОВОГО БИТА ОТСЮДА!
 }
 
 void mwEnd(void)

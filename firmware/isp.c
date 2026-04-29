@@ -367,6 +367,7 @@ uchar ispReadFlash(uint32_t address)
     return ispReadFlashRaw(address);
 }
 
+
 uchar ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode)
 {
    ispUpdateExtended(address);
@@ -380,38 +381,34 @@ uchar ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode)
     /* если страница ещё не полна – выходим сразу */
     if (!pollmode) return 0;
 
-    if (ispReadFlashRaw(address) == data) return 0; // ИСПРАВЛЕНО: напрямую без проверки ext
+    if (ispReadFlashRaw(address) == data) return 0; // ИСПРАВЛЕНО
 
     /* ---------- 3. Poll готовности ---------- */
     for (uint8_t t = 16; t; --t) {
       clockWait(t > 10 ? 1 : t > 7 ? 2 : 4);
-      // СТАРОЕ: if (ispReadFlash(address) == data) return 0;
+      //if (ispReadFlash(address) == data) return 0;
       if (ispReadFlashRaw(address) == data) return 0; // ИСПРАВЛЕНО
     }
     return 1;                 // timeout
 }
-
-uint8_t ispFlushPage(uint32_t address) {
+uchar ispFlushPage(uint32_t address) {
 
     ispUpdateExtended(address);
     
-    // Команда программирования страницы
     ispTransmit(0x4C);
     ispTransmit(address >> 9);
     ispTransmit(address >> 1);
     ispTransmit(0);
 
-    // Просто ждем максимальное время для данного MCU
-    // ATmega2560: max 9ms
-    // ATmega328P: max 4.5ms
-    // Берем с запасом
+    /* Всегда проверяем запись */
+    for (uint8_t t = 25; t > 0; t--) {
+        clockWait(t > 15 ? 1 : (t > 5 ? 2 : 4));
+        if (ispReadFlash(address) != 0xFF) {
+            return 0; // Успех
+        }
+    }
     
-    _delay_ms(6);  // 10ms достаточно для всех AVR
-    
-    // ВСЁ! Не проверяем содержимое!
-    // Avrdude сделает верификацию позже
-    
-    return 0;  // Всегда успех (предполагаем)
+    return 1; // Ошибка
 }
 
 uchar ispReadEEPROM(unsigned int address) {
@@ -427,11 +424,11 @@ uchar ispWriteEEPROM(unsigned int address, uchar data) {
 
     ispTransmit(0xC0);
     ispTransmit(address >> 8);    // Старший байт
-    ispTransmit(address & 0xFF);  // Младший байт  
+    ispTransmit(address & 0xFF);  // Младший байт
     ispTransmit(data);
     // Typical Wait Delay Before Writing
     // tWD_EEPROM min 3.6ms
-    _delay_ms(4); // wait 3.84ms
+    clockWait(11); // wait 3,52 ms
     return 0;
 
 }
