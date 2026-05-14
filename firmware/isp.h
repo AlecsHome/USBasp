@@ -76,8 +76,6 @@ void ispSetSCKOption(uchar option);
 
 void spibusy(void);
 
-uchar ispReadFlashRaw(uint32_t address);
-
 void ispUpdateExtended(uint32_t address);
 
 extern uint8_t last_success_speed; // объ€вление, а не определение

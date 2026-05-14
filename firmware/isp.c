@@ -353,7 +353,7 @@ void ispUpdateExtended(uint32_t address) {
     }
 }
 
-uchar ispReadFlashRaw(uint32_t address)
+uchar ispReadFlash(uint32_t address)
 {
     ispTransmit(0x20 | ((address & 1) << 3));
     ispTransmit(address >> 9);
@@ -361,16 +361,9 @@ uchar ispReadFlashRaw(uint32_t address)
     return ispTransmit(0);
 }
 
-uchar ispReadFlash(uint32_t address)
-{
-    ispUpdateExtended(address);
-    return ispReadFlashRaw(address);
-}
-
-
 uchar ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode)
 {
-   ispUpdateExtended(address);
+    // УБРАНО: ispUpdateExtended(address); 
 
     /* ---------- 1. Собственно загрузка байта в буфер страницы ---------- */
     ispTransmit(0x40 | ((address & 1) << 3));
@@ -381,19 +374,17 @@ uchar ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode)
     /* если страница ещё не полна – выходим сразу */
     if (!pollmode) return 0;
 
-    if (ispReadFlashRaw(address) == data) return 0; // ИСПРАВЛЕНО
+    if (ispReadFlash(address) == data) return 0; 
 
     /* ---------- 3. Poll готовности ---------- */
     for (uint8_t t = 16; t; --t) {
       clockWait(t > 10 ? 1 : t > 7 ? 2 : 4);
-      //if (ispReadFlash(address) == data) return 0;
-      if (ispReadFlashRaw(address) == data) return 0; // ИСПРАВЛЕНО
+      if (ispReadFlash(address) == data) return 0; 
     }
     return 1;                 // timeout
 }
-uchar ispFlushPage(uint32_t address) {
 
-    ispUpdateExtended(address);
+uchar ispFlushPage(uint32_t address) {
     
     ispTransmit(0x4C);
     ispTransmit(address >> 9);
@@ -403,6 +394,7 @@ uchar ispFlushPage(uint32_t address) {
     /* Всегда проверяем запись */
     for (uint8_t t = 25; t > 0; t--) {
         clockWait(t > 15 ? 1 : (t > 5 ? 2 : 4));
+        // Используем вашу исправленную функцию без ispUpdateExtended
         if (ispReadFlash(address) != 0xFF) {
             return 0; // Успех
         }

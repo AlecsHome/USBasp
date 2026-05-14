@@ -28,13 +28,8 @@
 #include <stddef.h>
 
 /* Макрос для быстрой проверки минимального значения */
-//#define MIN(a, b) (((a) < (b)) ? (a) : (b))
-// Правильный макрос MIN для разных типов
-#define MIN(a, b) ({ \
-    __typeof__(a) _a = (a); \
-    __typeof__(b) _b = (b); \
-    _a < _b ? _a : _b; \
-})
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+
 
 // --- Перемещаем ОПРЕДЕЛЕНИЯ переменных ВВЕРХ ---
 static uchar replyBuffer[8] = {0};
@@ -57,9 +52,6 @@ static uchar prog_address_newmode = 0;
 
 /* Глобальные переменные для I2C */
 uint8_t prog_stop_flag;  // Добавить эту строку
-//static uint8_t i2c_eeprom_device_addr = 0xA0;
-//static uint8_t i2c_eeprom_addr_size = 0;
-//static uint8_t i2c_stop_aw = 1;
 
 extern uchar sck_sw_delay;
 
@@ -81,13 +73,12 @@ static void setupSPIState(uint8_t mode, uint8_t *data) {
 }
 
 static void setupMicrowireOperation(uint8_t *data, uint8_t new_state) {
-    mw_addr = (data[3] << 8) | data[2];  // Адрес (16 бит)
-    mw_bitnum = data[4];                  // Длина адреса в битах
-    mw_opcode = data[5];                  // Код операции
-    prog_nbytes = (data[7] << 8) | data[6]; // Количество байт
+    mw_addr = (data[3] << 8) | data[2];  	// Адрес (16 бит)
+    mw_bitnum = data[4];                  	// Длина адреса в битах
+    mw_opcode = data[5];                  	// Код операции
+    prog_nbytes = (data[7] << 8) | data[6]; 	// Количество байт
     prog_state = new_state;
 }
-
 
 static void clearReplyBuffer(void) {
 	replyBuffer[0] = 0;
@@ -306,16 +297,20 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
     		* data[2], data[3] - wValue (МЛАДШИЕ 16 бит адреса)
     		* data[4], data[5] - wIndex (СТАРШИЕ 16 бит адреса)
     		*/
-    		uint32_t addr = ((uint32_t)data[5] << 24) |  // wIndex high (старший байт)
-                	    	((uint32_t)data[4] << 16) |  // wIndex low
-                    		((uint32_t)data[3] << 8)  |  // wValue high
-                    		(uint32_t)data[2];           // wValue low (младший байт)
+    		//uint32_t addr = ((uint32_t)data[5] << 24) |  // wIndex high (старший байт)
+                //	    	  ((uint32_t)data[4] << 16) |  // wIndex low
+                //    		  ((uint32_t)data[3] << 8)  |  // wValue high
+                //    		  (uint32_t)data[2];           // wValue low (младший байт)
 
     		// Сохраняем адрес
-    		prog_address = addr;
+    		//prog_address = addr;
+    		//в оригинальной прошке это делалось элегантнее одной строкой:
+    		prog_address = *((unsigned long*) &data[2]);
+    		// потому что архитектура AVR little-endian, и байты в памяти лежат ровно так, 
+    		// как нужно для 32-битного числа.
 
     		// ИСПОЛЬЗУЕМ СУЩЕСТВУЮЩУЮ ФУНКЦИЮ!
-    		ispUpdateExtended(addr);
+    		ispUpdateExtended(prog_address);
 
     		replyBuffer[0] = 0;  // Успех
     		len = 1;
@@ -493,50 +488,56 @@ uchar usbFunctionRead(uchar *data, uchar len)
 	
 	/* ---------- Чтение READFLASH ---------- */
         if (prog_state == PROG_STATE_READFLASH) {
-	    uint8_t bytes_read = 0;
-	    uint32_t addr = prog_address;
-	    uint8_t current_ext = isp_hiaddr; // 
-	    uint8_t to_read = (len < prog_nbytes) ? len : prog_nbytes;
+        	uint32_t addr = prog_address;
+	        uint8_t to_read = (len < prog_nbytes) ? len : prog_nbytes;
+	        uint8_t *dst = data;
+	        uint8_t current_ext = isp_hiaddr;
 
-	    while (bytes_read < to_read) {
-	        uint8_t ext = (addr >= 0x20000UL) ? (uint8_t)(addr >> 17) : 0;
+	        while (to_read--) {
+              // ОБЯЗАТЕЛЬНАЯ проверка внутри цикла! 
+              // Пересечение 64КБ может произойти в середине пакета V-USB.
+            if ((uint16_t)addr == 0) {
+                uint8_t ext = (uint8_t)(addr >> 16);
+                if (ext != current_ext) {
+                    current_ext = ext;
+                    isp_hiaddr = ext;
+                    ispTransmit(0x4D);
+                    ispTransmit(0x00);
+                    ispTransmit(ext);
+                    ispTransmit(0x00);
+                }
+            }
+            
+              *dst++ = ispReadFlash(addr++);
+           }
+
+           prog_address = addr;
+           prog_nbytes -= (dst - data);
+            if (prog_nbytes == 0) {
+                prog_state = PROG_STATE_IDLE;
+            }
+
+            len = (dst - data);
+          goto exit_success;
+        }
+
+    	/* ---------- Чтение EEPROM ---------- */
+    	if (prog_state == PROG_STATE_READEEPROM) {
+        	uint8_t to_read = (len < prog_nbytes) ? len : prog_nbytes;
+	        uint8_t *dst = data; // Указатель вместо индексации
         
-	        if (ext != current_ext) {
-	            current_ext = ext;
-	            // Отправляем SETLONGADDRESS только если адрес ≥ 128K
-	            if (addr >= 0x20000UL) {
-	                isp_hiaddr = ext;
-	                ispTransmit(0x4D);
-	                ispTransmit(0x00);
-	                ispTransmit(ext);
-	                ispTransmit(0x00);
-	            }
-	        }
-
-	        	data[bytes_read++] = ispReadFlashRaw(addr++);
-	    	}
-
-	    	  prog_address = addr;
-		  prog_nbytes -= bytes_read;
-		  if (prog_nbytes == 0) prog_state = PROG_STATE_IDLE;
-
-	    	len = bytes_read;
-	     goto exit_success;
-	}
-
-	/* ---------- Чтение EEPROM ---------- */
-		if (prog_state == PROG_STATE_READEEPROM) {
-	        // uint8_t i достаточно, так как len имеет тип uint8_t (макс. 64 байта от V-USB)
-	        for (uint8_t i = 0; i < len; i++) {
-	            data[i] = ispReadEEPROM((uint16_t)prog_address);
-	            prog_address++;
-	        }
-	        prog_nbytes -= len;
+	        while (to_read--) {
+	            *dst++ = ispReadEEPROM((uint16_t)prog_address++);
+	          }
+        
+	        prog_nbytes -= (dst - data);
 	        if (prog_nbytes == 0) {
 	            prog_state = PROG_STATE_IDLE;
-	        }
-	   goto exit_success;
-	}
+	           }
+        
+	        len = (dst - data);
+	        goto exit_success;
+	    }
 
   exit_unsupported:
     ledGreenOff();
@@ -638,101 +639,116 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 	  }
 
     	/* ---------- Flash – с extended addressing ---------- */
-	if (prog_state == PROG_STATE_WRITEFLASH) {
+    	if (prog_state == PROG_STATE_WRITEFLASH) {
         	uint32_t addr = prog_address;
-	        uint8_t current_ext = isp_hiaddr; 
+	        uint8_t *src = data;
+	        uint16_t remaining = len;
+	        uint8_t current_ext = isp_hiaddr;
 
-        	for (i = 0; i < len; i++) {
-	            // Обновляем extended адрес при переходе на новый блок 128KB
-	            if (addr >= 0x20000UL) {
-	                uint8_t ext = (uint8_t)(addr >> 17);
-	                if (ext != current_ext) {
-	                    current_ext = ext;
-	                    isp_hiaddr = ext;
-	                    ispTransmit(0x4D);  // Команда установки extended адреса
-	                    ispTransmit(0x00);
-	                    ispTransmit(ext);
-	                    ispTransmit(0x00);
-	                   }
-         	   	}
-
-	            if (prog_pagesize == 0) {
-	                if (ispWriteFlash(addr, data[i], 1) != 0) {
+        	if (prog_pagesize == 0) {
+	            // Быстрый путь без страниц
+	            while (remaining--) {
+	                if ((uint16_t)addr == 0) {
+	                    uint8_t ext = (uint8_t)(addr >> 16);
+	                    if (ext != current_ext) {
+	                        current_ext = ext;
+	                        isp_hiaddr = ext;
+	                        ispTransmit(0x4D); 
+	                        ispTransmit(0x00); 
+	                        ispTransmit(ext);  
+	                        ispTransmit(0x00);
+        	            }
+                	}
+                
+	                if (ispWriteFlash(addr++, *src++, 1) != 0) {
 	                    prog_state = PROG_STATE_IDLE;
 	                    prog_address = addr;
 	                    retVal = 0xFB;
 	                    goto exit;
 	                }
-	            } else {
-	                if (ispWriteFlash(addr, data[i], 0) != 0) {
-	                    prog_state = PROG_STATE_IDLE;
-	                    prog_address = addr;
-	                    retVal = 0xFB;
-	                    goto exit;
-	                }
-
+	            }
+        	} else {
+	            // Страничная запись
+	            while (remaining--) {
+	                if ((uint16_t)addr == 0) {
+	                    uint8_t ext = (uint8_t)(addr >> 16);
+	                    if (ext != current_ext) {
+	                        current_ext = ext;
+	                        isp_hiaddr = ext;
+	                        ispTransmit(0x4D); 
+	                        ispTransmit(0x00); 
+	                        ispTransmit(ext);  
+	                        ispTransmit(0x00);
+                    	    }
+                	}
+                
+                if (ispWriteFlash(addr, *src++, 0) != 0) {
+                    prog_state = PROG_STATE_IDLE;
+                    prog_address = addr;
+                    retVal = 0xFB;
+                    goto exit;
+                }
+                
+                addr++;
+                
                 if (--prog_pagecounter == 0) {
-                    uint32_t page_base = addr & ~(prog_pagesize - 1);
-
+                    // ИСПРАВЛЕНО: (addr - 1) возвращает нас к последнему записанному байту
+                    uint32_t page_base = (addr - 1) & ~((uint32_t)prog_pagesize - 1);
+                    
                     if (ispFlushPage(page_base) != 0) {
                         prog_state = PROG_STATE_IDLE;
                         prog_address = addr;
                         retVal = 0xFA;
                         goto exit;
-                    }
-
-                    prog_pagecounter = prog_pagesize;
-                   }
-	          }
-
-	            addr++;
+	                    }
+	                    prog_pagecounter = prog_pagesize;
+	                }
+	            }
 	        }
-
-	        prog_address = addr; 
+        
+	        prog_address = addr;
 	        prog_nbytes -= len;
-
+        
 	        if (prog_nbytes == 0) {
 	            prog_state = PROG_STATE_IDLE;
-
-	            // Защита от неполной страницы (хотя avrdude всегда выравнивает)
+	            // Защита последней неполной страницы
 	            if (prog_pagesize != 0 && prog_pagecounter != prog_pagesize) {
-	                uint32_t last_page_base = (prog_address - 1) & ~(prog_pagesize - 1);
-
-	                if (ispFlushPage(last_page_base) != 0) {
-	                    retVal = 0xFA;
-	                } else {
-	                    retVal = 1;
-	                }
+	                // Здесь тоже используем (prog_address - 1)
+	                uint32_t last_page_base = (prog_address - 1) & ~((uint32_t)prog_pagesize - 1);
+	                retVal = (ispFlushPage(last_page_base) == 0) ? 1 : 0xFA;
 	            } else {
 	                retVal = 1;
 	            }
-	        } else {
+	          } else {
 	            retVal = 0;
 	        }
+        
+           goto exit;
+    	}
 
-	        goto exit;
-	    }
-
-	/* ---------- EEPROM ---------- */
-	if (prog_state == PROG_STATE_WRITEEEPROM) {
-	        for (i = 0; i < len; i++) {
-	            if (ispWriteEEPROM((uint16_t)prog_address, data[i]) != 0) {
+    	/* ---------- EEPROM ---------- */
+    	if (prog_state == PROG_STATE_WRITEEEPROM) {
+         	uint8_t *src = data;
+        	uint16_t remaining = len;
+        
+	        while (remaining--) {
+	            if (ispWriteEEPROM((uint16_t)prog_address, *src++) != 0) {
 	                prog_state = PROG_STATE_IDLE;
-	                retVal     = 0xFC;
+	                retVal = 0xFC;
 	                goto exit;
 	            }
 	            prog_address++;
 	        }
+        
 	        prog_nbytes -= len;
-	
 	        if (prog_nbytes == 0) {
 	            prog_state = PROG_STATE_IDLE;
-	            retVal     = 1;
+	            retVal = 1;
 	        } else {
-	            retVal = 0;   
-	        }
-	        goto exit;
-	    }
+            retVal = 0;
+          }
+          goto exit;
+        }
 
 	/* Неизвестное состояние */
     	retVal = 0xFF;
