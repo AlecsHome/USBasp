@@ -26,10 +26,14 @@
 #include "I2c.h"
 #include "microwire.h"
 #include <stddef.h>
+#include <string.h>
 
 /* Макрос для быстрой проверки минимального значения */
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 
+// Быстрое вычисление расширенного адреса без 32-битной математики
+// Эквивалент (uint8_t)(addr >> 17), но компилируется в 2 инструкции
+#define GET_EXT_ADDR(addr) ( (*(((uint8_t*)&(addr))+2)) >> 1 )
 
 // --- Перемещаем ОПРЕДЕЛЕНИЯ переменных ВВЕРХ ---
 static uchar replyBuffer[8] = {0};
@@ -81,14 +85,7 @@ static void setupMicrowireOperation(uint8_t *data, uint8_t new_state) {
 }
 
 static void clearReplyBuffer(void) {
-	replyBuffer[0] = 0;
-	replyBuffer[1] = 0;
-	replyBuffer[2] = 0;
-	replyBuffer[3] = 0;
-	replyBuffer[4] = 0;
-	replyBuffer[5] = 0;
-	replyBuffer[6] = 0;
-	replyBuffer[7] = 0;
+    memset(replyBuffer, 0, 8); // Намного компактнее, чем 8 присваиваний
 }
 
 /* -------------------------------------------------------------------------------- */
@@ -487,53 +484,43 @@ uchar usbFunctionRead(uchar *data, uchar len)
 	}
 	
 	/* ---------- Чтение READFLASH ---------- */
-        if (prog_state == PROG_STATE_READFLASH) {
+    	if (prog_state == PROG_STATE_READFLASH) {
         	uint32_t addr = prog_address;
 	        uint8_t to_read = (len < prog_nbytes) ? len : prog_nbytes;
 	        uint8_t *dst = data;
-	        uint8_t current_ext = isp_hiaddr;
-
+        
+	        // ВАЖНО: Проверяем расширенный адрес ДО цикла (для пакетов начинающихся в новом сегменте)
+	        ispUpdateExtended(addr);
+	 
 	        while (to_read--) {
-              // ОБЯЗАТЕЛЬНАЯ проверка внутри цикла! 
-              // Пересечение 64КБ может произойти в середине пакета V-USB.
-            if ((uint16_t)addr == 0) {
-                uint8_t ext = (uint8_t)(addr >> 16);
-                if (ext != current_ext) {
-                    current_ext = ext;
-                    isp_hiaddr = ext;
-                    ispTransmit(0x4D);
-                    ispTransmit(0x00);
-                    ispTransmit(ext);
-                    ispTransmit(0x00);
-                }
-            }
+	            *dst++ = ispReadFlash((uint16_t)addr); // Передаем только 16 бит!
+	            addr++;
             
-              *dst++ = ispReadFlash(addr++);
-           }
+	            // Если младшие 16 бит переполнились в 0 - проверяем переход через границу 64K
+	            if ((uint16_t)addr == 0) {
+	                ispUpdateExtended(addr);
+	               }
+	        }
 
-           prog_address = addr;
-           prog_nbytes -= (dst - data);
-            if (prog_nbytes == 0) {
-                prog_state = PROG_STATE_IDLE;
-            }
+        	prog_address = addr;
+	        prog_nbytes -= (dst - data);
+	        if (prog_nbytes == 0) prog_state = PROG_STATE_IDLE;
 
-            len = (dst - data);
-          goto exit_success;
-        }
+	        len = (dst - data);
+	        goto exit_success;
+	    }
 
     	/* ---------- Чтение EEPROM ---------- */
-    	if (prog_state == PROG_STATE_READEEPROM) {
-        	uint8_t to_read = (len < prog_nbytes) ? len : prog_nbytes;
-	        uint8_t *dst = data; // Указатель вместо индексации
+	    if (prog_state == PROG_STATE_READEEPROM) {
+	        uint8_t to_read = (len < prog_nbytes) ? len : prog_nbytes;
+	        uint8_t *dst = data; 
         
 	        while (to_read--) {
 	            *dst++ = ispReadEEPROM((uint16_t)prog_address++);
-	          }
+	        }
         
-	        prog_nbytes -= (dst - data);
-	        if (prog_nbytes == 0) {
-	            prog_state = PROG_STATE_IDLE;
-	           }
+        	prog_nbytes -= (dst - data);
+	        if (prog_nbytes == 0) prog_state = PROG_STATE_IDLE;
         
 	        len = (dst - data);
 	        goto exit_success;
@@ -643,46 +630,29 @@ uchar usbFunctionWrite(uchar *data, uchar len)
         	uint32_t addr = prog_address;
 	        uint8_t *src = data;
 	        uint16_t remaining = len;
-	        uint8_t current_ext = isp_hiaddr;
+        
+	        // ВАЖНО: Проверяем расширенный адрес ДО цикла
+	        ispUpdateExtended(addr);
 
-        	if (prog_pagesize == 0) {
-	            // Быстрый путь без страниц
+	        if (prog_pagesize == 0) {
 	            while (remaining--) {
-	                if ((uint16_t)addr == 0) {
-	                    uint8_t ext = (uint8_t)(addr >> 16);
-	                    if (ext != current_ext) {
-	                        current_ext = ext;
-	                        isp_hiaddr = ext;
-	                        ispTransmit(0x4D); 
-	                        ispTransmit(0x00); 
-	                        ispTransmit(ext);  
-	                        ispTransmit(0x00);
-        	            }
-                	}
-                
-	                if (ispWriteFlash(addr++, *src++, 1) != 0) {
-	                    prog_state = PROG_STATE_IDLE;
-	                    prog_address = addr;
-	                    retVal = 0xFB;
-	                    goto exit;
+                if (ispWriteFlash((uint16_t)addr, *src++, 1) != 0) { // 16-bit адрес
+                    prog_state = PROG_STATE_IDLE;
+                    prog_address = addr;
+                    retVal = 0xFB;
+                    goto exit;
+                  }
+                  addr++;
+                if ((uint16_t)addr == 0) { // Проверка перехода 64K
+                    ispUpdateExtended(addr);
+                    
 	                }
 	            }
-        	} else {
-	            // Страничная запись
-	            while (remaining--) {
-	                if ((uint16_t)addr == 0) {
-	                    uint8_t ext = (uint8_t)(addr >> 16);
-	                    if (ext != current_ext) {
-	                        current_ext = ext;
-	                        isp_hiaddr = ext;
-	                        ispTransmit(0x4D); 
-	                        ispTransmit(0x00); 
-	                        ispTransmit(ext);  
-	                        ispTransmit(0x00);
-                    	    }
-                	}
-                
-                if (ispWriteFlash(addr, *src++, 0) != 0) {
+	          } 
+	        else {
+
+            	while (remaining--) {
+                if (ispWriteFlash((uint16_t)addr, *src++, 0) != 0) { // 16-bit адрес
                     prog_state = PROG_STATE_IDLE;
                     prog_address = addr;
                     retVal = 0xFB;
@@ -692,17 +662,20 @@ uchar usbFunctionWrite(uchar *data, uchar len)
                 addr++;
                 
                 if (--prog_pagecounter == 0) {
-                    // ИСПРАВЛЕНО: (addr - 1) возвращает нас к последнему записанному байту
-                    uint32_t page_base = (addr - 1) & ~((uint32_t)prog_pagesize - 1);
-                    
-                    if (ispFlushPage(page_base) != 0) {
+                    uint16_t page_base = ((uint16_t)addr - 1) & ~((uint16_t)prog_pagesize - 1);
+                    if (ispFlushPage(page_base) != 0) { // 16-bit адрес
                         prog_state = PROG_STATE_IDLE;
                         prog_address = addr;
                         retVal = 0xFA;
                         goto exit;
-	                    }
-	                    prog_pagecounter = prog_pagesize;
-	                }
+                    }
+                    prog_pagecounter = prog_pagesize;
+                }
+                
+                if ((uint16_t)addr == 0) { // Проверка перехода 64K
+                    ispUpdateExtended(addr);
+                
+                	}
 	            }
 	        }
         
@@ -711,31 +684,28 @@ uchar usbFunctionWrite(uchar *data, uchar len)
         
 	        if (prog_nbytes == 0) {
 	            prog_state = PROG_STATE_IDLE;
-	            // Защита последней неполной страницы
-	            if (prog_pagesize != 0 && prog_pagecounter != prog_pagesize) {
-	                // Здесь тоже используем (prog_address - 1)
-	                uint32_t last_page_base = (prog_address - 1) & ~((uint32_t)prog_pagesize - 1);
-	                retVal = (ispFlushPage(last_page_base) == 0) ? 1 : 0xFA;
+	         if (prog_pagesize != 0 && prog_pagecounter != prog_pagesize) {
+	            uint16_t last_page_base = ((uint16_t)prog_address - 1) & ~((uint16_t)prog_pagesize - 1);
+        	        retVal = (ispFlushPage(last_page_base) == 0) ? 1 : 0xFA;
 	            } else {
-	                retVal = 1;
+                retVal = 1;
 	            }
-	          } else {
-	            retVal = 0;
-	        }
-        
-           goto exit;
-    	}
+	       } else {
+             retVal = 0;
+	     }
+            goto exit;
+        }
 
     	/* ---------- EEPROM ---------- */
     	if (prog_state == PROG_STATE_WRITEEEPROM) {
-         	uint8_t *src = data;
-        	uint16_t remaining = len;
+        	uint8_t *src = data;
+	        uint16_t remaining = len;
         
 	        while (remaining--) {
 	            if (ispWriteEEPROM((uint16_t)prog_address, *src++) != 0) {
 	                prog_state = PROG_STATE_IDLE;
 	                retVal = 0xFC;
-	                goto exit;
+	              goto exit;
 	            }
 	            prog_address++;
 	        }
@@ -745,15 +715,14 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 	            prog_state = PROG_STATE_IDLE;
 	            retVal = 1;
 	        } else {
-            retVal = 0;
-          }
-          goto exit;
-        }
+	            retVal = 0;
+	        }
+	        goto exit;
+	    }
 
-	/* Неизвестное состояние */
-    	retVal = 0xFF;
+	    retVal = 0xFF;
  
-  exit:
+ exit:
     ledGreenOff();
     ledRedOn();
     return retVal;
