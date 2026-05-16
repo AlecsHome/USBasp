@@ -23,7 +23,6 @@
 /* ---------- RAM variable ---------- */
 .comm tpi_dly_cnt, 2           ; uint16_t tpi_dly_cnt
 
-
 /* =========================================================
  *              PUBLIC  API
  * =======================================================*/
@@ -31,10 +30,7 @@
 .global tpi_init
 .global tpi_send_byte
 .global tpi_recv_byte
-.global tpi_read_block
-.global tpi_write_block
 .global tpi_pr_update
-
 
 /* ---------------------------------------------------------
  *  tpi_init  --  32 dummy clocks + configure pins
@@ -54,7 +50,6 @@ tpi_init:
     dec r21
     brne 1b
     ret
-
 
 /* ---------------------------------------------------------
  *  tpi_send_byte  --  start + 8 data + parity + 2 stop
@@ -77,7 +72,6 @@ tpi_send_byte:
     rcall tpi_bit_h          ; stop 1
     rcall tpi_bit_h          ; stop 2
     ret
-
 
 /* ---------------------------------------------------------
  *  tpi_recv_byte  --  wait start, 8 data, parity, 2 stop
@@ -117,7 +111,6 @@ tpi_recv_byte:
     rcall tpi_bit_h          ; stop 1
     rcall tpi_bit_h          ; stop 2
     ret
-
 
 /* ---------------------------------------------------------
  *  LOW-LEVEL BIT I/O
@@ -159,7 +152,6 @@ tpi_bit:
     cbi _SFR_IO_ADDR(TPI_CLK_PORT),  TPI_CLK_PIN
     ret
 
-
 /* ---------------------------------------------------------
  *  DELAY  (t_low = t_high = tpi_dly_cnt cycles)
  * -------------------------------------------------------*/
@@ -169,45 +161,6 @@ tpi_delay:
 1:  sbiw r30, 1
     brsh 1b
     ret
-
-
-/* ---------------------------------------------------------
- *  BLOCK READ / WRITE
- * -------------------------------------------------------*/
-/* void tpi_read_block(uint16_t length, uint8_t *buf) */
-/* r20 = length, r22:r23 = buf */
-tpi_read_block:
-    rcall tpi_pr_update      ; PR = address (already in r24:r25)
-1:  ldi r24, TPI_OP_SLD_INC
-    rcall tpi_send_byte
-    rcall tpi_recv_byte      ; r24 = data
-    st  X+, r24
-    dec r20
-    brne 1b
-    ret
-
-
-/* void tpi_write_block(uint16_t length, uint8_t *buf) */
-tpi_write_block:
-    rcall tpi_pr_update
-1:  ldi r24, TPI_OP_SOUT(NVMCMD)
-    rcall tpi_send_byte
-    ldi r24, NVMCMD_WORD_WRITE
-    rcall tpi_send_byte
-    ldi r24, TPI_OP_SST_INC
-    rcall tpi_send_byte
-    ld  r24, X+
-    rcall tpi_send_byte
-    /* wait NVM ready */
-2:  ldi r24, TPI_OP_SIN(NVMCSR)
-    rcall tpi_send_byte
-    rcall tpi_recv_byte
-    andi r24, NVMCSR_BSY
-    brne 2b
-    dec r20
-    brne 1b
-    ret
-
 
 /* ---------------------------------------------------------
  *  UPDATE POINTER REGISTER  (PR = r25:r24)
@@ -223,19 +176,3 @@ tpi_pr_update:
     mov r24, r21
     rcall tpi_send_byte
     ret
-
-; ------- старый ABI (addr, buf, len) Ц игнорируем addr -------
-.global tpi_read_block_old
-tpi_read_block_old:
-    ; r22:r21 Ц addr (не нужен)
-    ; r20:r19 Ц buf
-    ; r18:r17 Ц len
-    movw r22, r20        ; buf -> X
-    movw r20, r18        ; len -> r20
-    rjmp tpi_read_block  ; вызываем новую реализацию
-
-.global tpi_write_block_old
-tpi_write_block_old:
-    movw r22, r20
-    movw r20, r18
-    rjmp tpi_write_block

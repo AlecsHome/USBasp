@@ -33,17 +33,6 @@ uint8_t tpi_recv_byte(void);
  * \param dptr Pointer to dest memory block
  * \param len Length of read
  */
-/* новые Ц короткие */
-void tpi_read_block (uint16_t len, uint8_t *buf);
-void tpi_write_block(uint16_t len, uint8_t *buf);
-
-/* старые Ц дл€ совместимости с main.c */
-void tpi_read_block_old (uint16_t addr, uint8_t *buf, uint16_t len);
-void tpi_write_block_old(uint16_t addr, uint8_t *buf, uint16_t len);
-
-/* макросы-алиасы Ц чтобы не трогать main.c */
-#define tpi_read_block  tpi_read_block_old
-#define tpi_write_block tpi_write_block_old
 
 void tpi_pr_update(uint16_t addr);
 
