@@ -591,7 +591,8 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 	    prog_nbytes -= bytes_to_write;
 
 	    if (prog_nbytes == 0) {              // всё передали
-	        prog_stop_flag ? i2c_stop() : i2c_start();
+	        prog_stop_flag ? i2c_stop() : 
+	        i2c_start();
 	        prog_state = PROG_STATE_IDLE;
 	    }
 

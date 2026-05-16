@@ -26,16 +26,16 @@ uint8_t last_success_speed = USBASP_ISP_SCK_3000;
 #define GET_EXT_ADDR(addr) ( (*(((uint8_t*)&(addr))+2)) >> 1 )
 
 // Таблицы скоростей для аппаратного SPI (индекс = скорость - USBASP_ISP_SCK_3000)
-static const uchar hw_spcr_table[] PROGMEM = {
+static const uint8_t hw_spcr_table[] PROGMEM = {
     (1 << SPE) | (1 << MSTR),                                  // 3.0 MHz
     (1 << SPE) | (1 << MSTR) | (1 << SPR0),                    // 1.5 MHz
     (1 << SPE) | (1 << MSTR) | (1 << SPR0),                    // 0.75 MHz
     (1 << SPE) | (1 << MSTR) | (1 << SPR1),                    // 0.375 MHz
     (1 << SPE) | (1 << MSTR) | (1 << SPR1),                    // 0.1875 MHz
-    (1 << SPE) | (1 << MSTR) | (1 << SPR1) | (1 << SPR0)      // 0.09375 MHz
+    (1 << SPE) | (1 << MSTR) | (1 << SPR1) | (1 << SPR0)       // 0.09375 MHz
 };
 
-static const uchar hw_spsr_table[] PROGMEM = {
+static const uint8_t hw_spsr_table[] PROGMEM = {
     0,                // 3.0 MHz
     (1 << SPI2X),     // 1.5 MHz
     0,                // 0.75 MHz
@@ -45,9 +45,9 @@ static const uchar hw_spsr_table[] PROGMEM = {
 };
 
 // Таблицы для программного SPI (индекс = скорость - USBASP_ISP_SCK_32)
-static const uchar sw_delay_table[] PROGMEM = { 3, 6, 12, 24, 48, 96, 192 };
+static const uint8_t sw_delay_table[] PROGMEM = { 3, 6, 12, 24, 48, 96, 192 };
 
-static const uchar isp_retry_speeds[] PROGMEM = {
+static const uint8_t isp_retry_speeds[] PROGMEM = {
     USBASP_ISP_SCK_3000, USBASP_ISP_SCK_1500, USBASP_ISP_SCK_750,
     USBASP_ISP_SCK_375, USBASP_ISP_SCK_187_5, USBASP_ISP_SCK_93_75,
     USBASP_ISP_SCK_32, USBASP_ISP_SCK_16, USBASP_ISP_SCK_8,
@@ -71,24 +71,48 @@ static inline void spiHWdisable() {
     SPCR = 0;
 }
 
-void ispSetSCKOption(uchar option) {
+void ispSetSCKOption(uint8_t option) {
+    // 1. Обработка AUTO
     if (option == USBASP_ISP_SCK_AUTO) {
         option = (last_success_speed != USBASP_ISP_SCK_AUTO) ? last_success_speed : USBASP_ISP_SCK_3000;
     }
-    prog_sck = option;
+    
+    // 2. Защита от мусора (некорректный код скорости)
+    if (option < USBASP_ISP_SCK_0_5 || option > USBASP_ISP_SCK_3000) {
+        option = USBASP_ISP_SCK_3000; // Откат на безопасную скорость
+    }
 
+    // 3. Сохраняем УЖЕ ПРОВЕРЕННОЕ значение для GETISPSCK
+    prog_sck = option;  
+
+    // 4. Настройка аппаратного SPI
     if (option >= USBASP_ISP_SCK_93_75) {
-        ispTransmit = (uchar (*)(uchar))ispTransmit_hw;
+        ispTransmit = (uint8_t (*)(uint8_t))ispTransmit_hw;
         sck_sw_delay = 1;
-        // Читаем из таблиц вместо огромного switch
+
         uint8_t idx = option - USBASP_ISP_SCK_3000;
-        sck_spcr = pgm_read_byte(&hw_spcr_table[idx]);
-        sck_spsr = pgm_read_byte(&hw_spsr_table[idx]);
+
+        if (idx < sizeof(hw_spcr_table)) {
+            sck_spcr = pgm_read_byte(&hw_spcr_table[idx]);
+            sck_spsr = pgm_read_byte(&hw_spsr_table[idx]);
+        } else {
+            // Fallback (по сути, уже недостижимо из-за проверки п.2, но для надежности оставим)
+            sck_spcr = (1 << SPE) | (1 << MSTR) | (1 << SPR0);
+            sck_spsr = (1 << SPI2X);
+        }
+        
         spiHWenable();
+    
+    // 5. Настройка программного SPI
     } else {
         ispTransmit = ispTransmit_sw;
         uint8_t idx = option - USBASP_ISP_SCK_32;
-        sck_sw_delay = pgm_read_byte(&sw_delay_table[idx]);
+        
+        if (idx < sizeof(sw_delay_table)) {
+            sck_sw_delay = pgm_read_byte(&sw_delay_table[idx]);
+        } else {
+            sck_sw_delay = 48;  // Значение по умолчанию
+        }
     }
 }
 
@@ -120,7 +144,7 @@ void ispConnect() {
     }
     
     /* Initial extended address value */
-    isp_hiaddr = 0xff;  /* ensure that even 0x00000 causes a write of the extended address byte */
+    isp_hiaddr = 0xFF;  /* ensure that even 0x00000 causes a write of the extended address byte */
     
 }
 
@@ -132,7 +156,7 @@ void isp25Connect() {
 	if (ispTransmit == (uchar (*)(uchar))ispTransmit_hw) {
 		spiHWenable();
 	}
-	isp_hiaddr = 0xff;  /* ensure that even 0x00000 causes a write of the extended address byte */
+	isp_hiaddr = 0xFF;  /* ensure that even 0x00000 causes a write of the extended address byte */
 	CS_HI();
 }
 
@@ -319,7 +343,7 @@ uchar ispFlushPage(uint16_t address) {
     return 1;
 }
 
-uchar ispReadEEPROM(unsigned int address) {
+uchar ispReadEEPROM(uint16_t address) {
 
     ispTransmit(0xA0);
     ispTransmit(address >> 8);
@@ -328,7 +352,7 @@ uchar ispReadEEPROM(unsigned int address) {
     
 }
 
-uchar ispWriteEEPROM(unsigned int address, uchar data) {
+uchar ispWriteEEPROM(uint16_t address, uint8_t data) {
 
     ispTransmit(0xC0);
     ispTransmit(address >> 8);    // Старший байт
@@ -336,7 +360,7 @@ uchar ispWriteEEPROM(unsigned int address, uchar data) {
     ispTransmit(data);
     // Typical Wait Delay Before Writing
     // tWD_EEPROM min 3.6ms
-    clockWait(11); // wait 3,52 ms
+    clockWait(12); // wait 3,84 ms
     return 0;
 
 }
