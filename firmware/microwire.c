@@ -51,12 +51,11 @@ void mwEnd(void)
 }
 
 /* -------------- core primitives -------------- */
-
 // ИСПРАВЛЕНО: uint8_t data -> uint32_t data, и 1UL для маски
-uint8_t mwSendData(uint32_t data, uint8_t bits)
+void mwSendData(uint16_t data, uint8_t bits)
 {
-    for (uint32_t mask = 1UL << (bits - 1); mask; mask >>= 1) {
-        mw_clk_lo();
+    for (uint16_t mask = 1U << (bits - 1); mask; mask >>= 1) {
+	mw_clk_lo();
         if (data & mask) 
             mw_si_hi();
         else 
@@ -66,7 +65,7 @@ uint8_t mwSendData(uint32_t data, uint8_t bits)
         ispDelay();          /* high time    */
         mw_clk_lo();         /* clock low for next bit */
     }
-    return 0; 
+//    return 0; 
 }
 
 uint8_t mwReadByte(void)
@@ -81,17 +80,6 @@ uint8_t mwReadByte(void)
         mw_clk_lo();        /* clock low for next bit */
     }
     return val;
-}
-
-/* Чтение Dummy бита (пустой такт) перед потоком данных */
-void mwReadDummyBit(void)
-{
-    mw_clk_lo();
-    ispDelay();
-    mw_clk_hi();
-    ispDelay();
-    mw_so_read(); // Просто читаем, результат игнорируем
-    mw_clk_lo();
 }
 
 /* -------------- higher level -------------- */
@@ -131,4 +119,15 @@ uint8_t mwGetAdrLen(void)
     
     mwEnd();
     return len;
+}
+
+/* Чтение Dummy бита (пустой такт) перед потоком данных */
+void mwReadDummyBit(void)
+{
+    mw_clk_lo();
+    ispDelay();
+    mw_clk_hi();
+    ispDelay();
+    mw_so_read(); // Просто читаем, результат игнорируем
+    mw_clk_lo();
 }

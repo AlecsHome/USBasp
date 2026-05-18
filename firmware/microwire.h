@@ -3,14 +3,14 @@ void mwBegin(void);
 
 void mwStart(void);
 
-uint8_t mwSendData(uint32_t data, uint8_t bits);
+void mwSendData(uint16_t data, uint8_t bits);
 
 unsigned char mwReadByte();
-
-void mwReadDummyBit(void);
 
 void mwEnd();
 
 uchar mwBusy();
 
 unsigned char mwGetAdrLen();
+
+void mwReadDummyBit(void);

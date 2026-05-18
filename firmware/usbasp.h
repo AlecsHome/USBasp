@@ -88,8 +88,8 @@
 #define PROG_STATE_MW_WRITE		58
 
 // Block mode data size
-//#define USBASP_READBLOCKSIZE   		0xFF
-//#define USBASP_WRITEBLOCKSIZE  		0xFF
+#define USBASP_READBLOCKSIZE   0xFF
+#define USBASP_WRITEBLOCKSIZE  0xFF
 
 // ISP SCK speed identifiers
 #define USBASP_ISP_SCK_AUTO   	0

@@ -143,4 +143,3 @@ unsigned char i2c_address(unsigned char address, unsigned char rw) {
     }
     return i2c_send_byte(address);
 }
-
