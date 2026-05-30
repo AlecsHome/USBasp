@@ -61,9 +61,6 @@ extern void tpi_pr_update(uint16_t addr);
 
 /* Глобальные переменные для I2C */
 uint8_t prog_stop_flag;  // Добавить эту строку
-//static uint8_t i2c_eeprom_device_addr = 0xA0;
-//static uint8_t i2c_eeprom_addr_size = 0;
-//static uint8_t i2c_stop_aw = 1;
 
 extern uchar sck_sw_delay;
 
@@ -101,6 +98,7 @@ static void clearReplyBuffer(void) {
 static inline void ispInvalidateExtAddrCache() {
     isp_hiaddr = 0xFF; // Значение, которое никогда не совпадет с реальным адресом
 }
+
 // Блоковое чтение TPI (написано на C для корректного ABI)
 void tpi_read_block_c(uint16_t addr, uint8_t *buf, uint16_t len) {
     tpi_pr_update(addr);
@@ -156,7 +154,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 	} else if (data[1] == USBASP_FUNC_SPI_CONNECT) {
 		ispSetSCKOption(prog_sck);
 		ledRedOn();
-		isp25Connect();
+		ispSPIConnect();
 			
 	} else if (data[1] == USBASP_FUNC_SPI_READ) {
     		setupSPIState(PROG_STATE_SPI_READ, data);

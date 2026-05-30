@@ -99,49 +99,48 @@ void ispDelay() {
 	}
 }
 
-void ispConnect() {
-    /* all ISP pins are inputs before */
-    /* now set output pins */
+// Базовая инициализация пинов (inline, чтобы не тратить флеш на вызов функции)
+static inline void ispInitPins(void) {
     ISP_DDR |= (1 << ISP_RST) | (1 << ISP_SCK) | (1 << ISP_MOSI);
-    ISP_DDR &= ~(1 << ISP_MISO); // MISO всегда вход
+    ISP_DDR &= ~(1 << ISP_MISO); // Обязательно для обоих режимов!
+    
+    if (ispTransmit == (uchar (*)(uchar))ispTransmit_hw) {
+        spiHWenable();
+    }
+    
+    isp_hiaddr = 0xFF;
+}
 
-    /* reset device */
+// Для AVR (с reset pulse)
+void ispConnect(void) {
+    ispInitPins();
+    
     ISP_OUT &= ~(1 << ISP_RST); /* RST low */
     ISP_OUT &= ~(1 << ISP_SCK); /* SCK low */
 
     /* positive reset pulse > 2 SCK (target) */
     clockWait(1); /* ~320 µs */
     ISP_OUT |= (1 << ISP_RST); /* RST high */
-    clockWait(1);           /* 320us */
+    clockWait(1);               /* 320us */
     ISP_OUT &= ~(1 << ISP_RST);/* RST low */
-
-    if (ispTransmit == (uchar (*)(uchar))ispTransmit_hw) {
-        spiHWenable();
-    }
-    
-    /* Initial extended address value */
-    isp_hiaddr = 0xff;  /* ensure that even 0x00000 causes a write of the extended address byte */
-    
 }
 
-void isp25Connect() {
-	/* all ISP pins are inputs before */
-	/* now set output pins */
-	ISP_DDR |= (1 << ISP_RST) | (1 << ISP_SCK) | (1 << ISP_MOSI);
-	
-	if (ispTransmit == (uchar (*)(uchar))ispTransmit_hw) {
-		spiHWenable();
-	}
-	isp_hiaddr = 0xff;  /* ensure that even 0x00000 causes a write of the extended address byte */
-	CS_HI();
+// Для SPI Flash (без reset)
+void ispSPIConnect(void) {
+    ispInitPins();
+    CS_HI(); // Просто снимаем CS (RST = 1)
 }
 
-void ispDisconnect() {
-    /* set all ISP pins inputs */
+void ispDisconnect(void) {
+ 
+    ISP_OUT |= (1 << ISP_RST);
+    clockWait(1);
+    
     ISP_DDR &= ~((1 << ISP_RST) | (1 << ISP_SCK) | (1 << ISP_MOSI));
-    /* switch pullups off */
     ISP_OUT &= ~((1 << ISP_RST) | (1 << ISP_SCK) | (1 << ISP_MOSI));
-   
+    
+    spiHWdisable();  // Всегда безопасно, даже если SPI уже отключён
+    prog_sck = USBASP_ISP_SCK_AUTO;
 }
 
 uchar ispTransmit_sw(uchar send_byte)
@@ -190,15 +189,17 @@ static uchar tryEnterProgMode(uchar speed_code)
     ispSetSCKOption(speed_code);
 
     /* Адаптивные тайминги сброса: длинные для SW (≤ 32 кГц), короткие для HW */
-    uint8_t pulse = (speed_code <= USBASP_ISP_SCK_32) ? 15 : 1;
-    uint8_t delay = (speed_code <= USBASP_ISP_SCK_32) ? 250 : 63;
-
+    uint8_t pulse = (speed_code <= USBASP_ISP_SCK_32) ? 15 : 1;   // 15 или 1 тик * 320 мкс
+    uint8_t delay = (speed_code <= USBASP_ISP_SCK_32) ? 250 : 63; // 250 или 63 тика
+  
     for (uchar tries = 3; tries > 0; tries--) {
+        // RST pulse
         ISP_OUT |= (1 << ISP_RST);
         clockWait(pulse);
         ISP_OUT &= ~(1 << ISP_RST);
-        clockWait(delay);
+        clockWait(delay);  // ~20 мс для HW, ~80 мс для SW
 
+        // Programming Enable
         ispTransmit(0xAC);
         ispTransmit(0x53);
         uchar check  = ispTransmit(0);
@@ -207,7 +208,7 @@ static uchar tryEnterProgMode(uchar speed_code)
         if (check == 0x53 && check2 == 0x00) {
             return 0; /* успех */
         }
-        _delay_ms(5);
+        clockWait(3);
     }
     return 1; /* не удалось */
 }
@@ -338,14 +339,20 @@ uchar ispReadEEPROM(unsigned int address) {
 }
 
 uchar ispWriteEEPROM(unsigned int address, uchar data) {
-
     ispTransmit(0xC0);
     ispTransmit(address >> 8);    // Старший байт
     ispTransmit(address & 0xFF);  // Младший байт
     ispTransmit(data);
-    // Typical Wait Delay Before Writing
-    // tWD_EEPROM min 3.6ms
-    clockWait(11); // wait 3,52 ms
-    return 0;
 
+    // Мгновенная проверка (иногда чип невероятно быстр)
+    if (ispReadEEPROM(address) == data) return 0; 
+
+    // Прогрессивный опрос готовности (ваш вариант)
+    for (uint8_t t = 6; t; --t) {
+        clockWait(t > 4 ? 1 : t > 2 ? 2 : 4);
+        if (ispReadEEPROM(address) == data) return 0; 
+    }
+    
+    return 1; // Таймаут (ошибка записи)
 }
+
