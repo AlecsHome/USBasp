@@ -42,7 +42,7 @@ extern uchar prog_address_newmode;
 /* Prepare connection to target device */
 void ispConnect();
 
-void isp25Connect();
+void ispSPIConnect();
 
 /* Close connection to target device */
 void ispDisconnect();
@@ -62,12 +62,12 @@ uchar ispEnterProgrammingMode();
 uchar ispReadEEPROM(unsigned int address);
 
 /* write byte to flash at given address */
-uchar ispWriteFlash(uint16_t address, uchar data, uchar pollmode);
+uchar ispWriteFlash(uint32_t address, uchar data, uchar pollmode);
 
-uchar ispFlushPage(uint16_t address);
+uchar ispFlushPage(uint32_t address);
 
 /* read byte from flash at given address */
-uchar ispReadFlash(uint16_t address);
+uchar ispReadFlash(uint32_t address);
 
 /* write byte to eeprom at given address */
 uchar ispWriteEEPROM(unsigned int address, uchar data);

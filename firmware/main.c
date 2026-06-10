@@ -31,10 +31,6 @@
 /* Макрос для быстрой проверки минимального значения */
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 
-// Быстрое вычисление расширенного адреса без 32-битной математики
-// Эквивалент (uint8_t)(addr >> 17), но компилируется в 2 инструкции
-//#define GET_EXT_ADDR(addr) ( (*(((uint8_t*)&(addr))+2)) >> 1 )
-
 // --- Перемещаем ОПРЕДЕЛЕНИЯ переменных ВВЕРХ ---
 static uchar replyBuffer[8] = {0};
 static uchar prog_state = PROG_STATE_IDLE;
@@ -94,10 +90,6 @@ static void clearReplyBuffer(void) {
     memset(replyBuffer, 0, 8); // Намного компактнее, чем 8 присваиваний
 }
 
-// Функция инвалидации кэша (ВЫЗЫВАТЬ ПОСЛЕ FLUSH!)
-static inline void ispInvalidateExtAddrCache() {
-    isp_hiaddr = 0xFF; // Значение, которое никогда не совпадет с реальным адресом
-}
 
 // Блоковое чтение TPI (написано на C для корректного ABI)
 void tpi_read_block_c(uint16_t addr, uint8_t *buf, uint16_t len) {
@@ -558,35 +550,37 @@ uchar usbFunctionRead(uchar *data, uchar len)
 	
 	/* ---------- Чтение READFLASH ---------- */
 	if (prog_state == PROG_STATE_READFLASH) {
-	    uint8_t bytes_read = 0;
-	    uint32_t addr = prog_address;
-	    uint8_t to_read = (len < prog_nbytes) ? len : prog_nbytes;
+	   	uint8_t bytes_read = 0;
+	   	uint32_t addr = prog_address;
+           	uint8_t to_read = (len < prog_nbytes) ? len : prog_nbytes;
+           	uint8_t *dst = data; // Указатель вместо индекса
 
-	    // 1. Обязательно обновляем extended адрес в НАЧАЛЕ пакета
-	    ispUpdateExtended(addr);
+          	// Обновляем extended адрес в НАЧАЛЕ пакета
+        	ispUpdateExtended(addr);
 
-	    while (bytes_read < to_read) {
-	        // 2. Читаем байт. Явно приводим к 16 бит, так как SPI шлет только 2 байта адреса
-	        data[bytes_read++] = ispReadFlash((uint16_t)addr);
-	        addr++;
+        	while (bytes_read < to_read) {
+             	// Передаем полный 32-бит адрес, но внутри ispReadFlash он обрезается до 17 бит быстро
+	            *dst++ = ispReadFlash(addr);
+	            addr++;
+	            bytes_read++;
 
-	        // 3. Проверяем переход через границу 128K (каждые 0x20000 байт)
-	        // Это заменяет вызов ispUpdateExtended на каждой итерации!
-	        if ((addr & 0x1FFFF) == 0) {
-	            ispUpdateExtended(addr);
+	            // Проверяем переход через границу 128K (каждые 0x20000 байт)
+	            // Условие сработает очень редко, поэтому 32-битный AND здесь не тормозит
+	            if ((addr & 0x1FFFF) == 0) {
+	                ispUpdateExtended(addr);
+	            }
 	        }
-	    }
 
-	    prog_address = addr;
-	    prog_nbytes -= bytes_read;
-	    if (prog_nbytes == 0) prog_state = PROG_STATE_IDLE;
+	        prog_address = addr;
+	        prog_nbytes -= bytes_read;
+	        if (prog_nbytes == 0) prog_state = PROG_STATE_IDLE;
 
-	    len = bytes_read;
-	    goto exit_success;
+	        len = bytes_read;
+	        goto exit_success;
 	}
 
     	/* ---------- Чтение EEPROM ---------- */
-	    if (prog_state == PROG_STATE_READEEPROM) {
+	if (prog_state == PROG_STATE_READEEPROM) {
 	        uint8_t to_read = (len < prog_nbytes) ? len : prog_nbytes;
 	        uint8_t *dst = data; 
         
@@ -722,78 +716,79 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 
     	/* ---------- Flash – с extended addressing ---------- */
 	if (prog_state == PROG_STATE_WRITEFLASH) {
-	    uint32_t addr = prog_address;
+	        uint32_t addr = prog_address;
+	        uint8_t *src = data; // Оптимизация: указатель вместо data[i]
+	        uint16_t remaining = len;
 
-	    // Обновляем адрес в начале пакета
-	    ispUpdateExtended(addr);
+	        // Обновляем адрес в начале пакета
+	        ispUpdateExtended(addr);
 
-	    for (i = 0; i < len; i++) {
-	      
-	      if (prog_pagesize == 0) {
-	       
-	        if (ispWriteFlash((uint16_t)addr, data[i], 1) != 0) { 
-	          	prog_state = PROG_STATE_IDLE;
-                  	prog_address = addr;
-                  	retVal = 0xFB;
-                	goto exit;
-	               }
-
- 	         } else {
-	         
-	           if (ispWriteFlash((uint16_t)addr, data[i], 0) != 0) { 
-	           	prog_state = PROG_STATE_IDLE;
-                	prog_address = addr;
-	                retVal = 0xFB;
-        	        goto exit;
-	               }
-
-	            if (--prog_pagecounter == 0) {
-	                uint32_t page_base = addr & ~((uint32_t)prog_pagesize - 1);
-	                if (ispFlushPage((uint16_t)page_base) != 0) {
-	                 prog_state = PROG_STATE_IDLE;
-  	                  prog_address = addr;
-	                    retVal = 0xFA;
+	        while (remaining--) {
+	            if (prog_pagesize == 0) {
+	                // ПЕРЕДАЕМ ПОЛНЫЙ 32-БИТ АДРЕС! Никаких (uint16_t)
+	                if (ispWriteFlash(addr, *src++, 1) != 0) { 
+	                    prog_state = PROG_STATE_IDLE;
+	                    prog_address = addr;
+	                    retVal = 0xFB;
 	                    goto exit;
-	                  }
-                
-	                prog_pagecounter = prog_pagesize;
-	                // После Flush чип сбросил адрес, инвалидируем кэш!
-	                ispInvalidateExtAddrCache(); 
+	                }
+	            } else {
+	                if (ispWriteFlash(addr, *src++, 0) != 0) { 
+	                    prog_state = PROG_STATE_IDLE;
+	                    prog_address = addr;
+	                    retVal = 0xFB;
+	                    goto exit;
+	                }
+
+                  if (--prog_pagecounter == 0) {
+                    uint32_t page_base = addr & ~((uint32_t)prog_pagesize - 1);
+                    // ПЕРЕДАЕМ ПОЛНЫЙ 32-БИТ АДРЕС!
+                    if (ispFlushPage(page_base) != 0) {
+                        prog_state = PROG_STATE_IDLE;
+                        prog_address = addr;
+                        retVal = 0xFA;
+                        goto exit;
+                    }
+                    
+	                    prog_pagecounter = prog_pagesize;
+	                    // После Flush чип мог сбросить внутренний указатель.
+	                    // Сбрасываем наш кэш, чтобы 0x4D гарантированно отправилась на следующем шаге.
+	                    isp_hiaddr = 0xFF; 
+	                }
 	            }
-	        }
         
-        	addr++;
+	            addr++;
         
-	        // Проверяем переход границы 128K
-	        if ((addr & 0x1FFFF) == 0) {
-	            ispUpdateExtended(addr);
-        	    }
-           	}	
-		    prog_address = addr; 
-		    prog_nbytes -= len;
+	            // Проверяем переход границы 128K
+	            if ((addr & 0x1FFFF) == 0) {
+	                ispUpdateExtended(addr);
+	            }
+	        }	
+        
+	        prog_address = addr; 
+	        prog_nbytes -= len;
 
-	    if (prog_nbytes == 0) {
-	        prog_state = PROG_STATE_IDLE;
+	        if (prog_nbytes == 0) {
+	            prog_state = PROG_STATE_IDLE;
 
-	        if (prog_pagesize != 0 && prog_pagecounter != prog_pagesize) {
-	            uint32_t last_page_base = (prog_address - 1) & ~((uint32_t)prog_pagesize - 1);
+	            if (prog_pagesize != 0 && prog_pagecounter != prog_pagesize) {
+	                uint32_t last_page_base = (prog_address - 1) & ~((uint32_t)prog_pagesize - 1);
 
-	            if (ispFlushPage(last_page_base) != 0) {
-	                retVal = 0xFA;
+	                if (ispFlushPage(last_page_base) != 0) {
+	                    retVal = 0xFA;
+	                } else {
+	                    retVal = 1;
+	                }
+	                isp_hiaddr = 0xFF; // Инвалидируем кэш после последней страницы
 	            } else {
 	                retVal = 1;
 	            }
-	            // Инвалидируем кэш и после последней записанной страницы
-	            ispInvalidateExtAddrCache();
 	        } else {
-	            retVal = 1;
+	            retVal = 0;
 	        }
-	    } else {
-	        retVal = 0;
-	    }
 
-	    goto exit;
-	}
+	        goto exit;
+    	}
 
     	/* ---------- EEPROM ---------- */
     	if (prog_state == PROG_STATE_WRITEEEPROM) {
