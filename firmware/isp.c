@@ -22,8 +22,15 @@ uchar (*ispTransmit)(uchar) = NULL;
 uint8_t last_success_speed = USBASP_ISP_SCK_3000;
 
 // Быстрое вычисление расширенного адреса без 32-битной математики
-// Эквивалент (uint8_t)(addr >> 17), но компилируется в 2 инструкции
-#define GET_EXT_ADDR(address) ( (*(((uint8_t*)&(address))+2)) >> 1 )
+// Эквивалент (uint8_t)(addr >> 17), но компилируется в 2 инструкции  
+// Быстрое вычисление расширенного адреса без 32-битной математики
+// Работает только на little-endian архитектурах (AVR - little-endian)
+#define GET_EXT_ADDR(address) (((uint8_t*)&(address))[2] >> 1)
+//#define GET_EXT_ADDR(address) (uint8_t)((((uint8_t*)&(address))[2] >> 1) & 0x7F) //лишняя операция AND старшие биты всегда равны 0
+
+// Быстрое и безопасное вычисление расширенного адреса (банка 128K)
+// Эквивалент (addr >> 17), но компилируется оптимально благодаря касту (uint8_t)
+//#define GET_EXT_ADDR(address) ((uint8_t)((address) >> 17))      // +90 байт	
 
 // Таблицы скоростей для аппаратного SPI (индекс = скорость - USBASP_ISP_SCK_3000)
 static const uchar hw_spcr_table[] PROGMEM = {
