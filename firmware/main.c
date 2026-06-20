@@ -20,7 +20,6 @@
 #include "usbdrv.h"
 #include "isp.h"
 #include "clock.h"
-#include <util/delay.h> 
 #include "tpi.h"
 #include "tpi_defs.h"
 #include "I2c.h"
@@ -41,7 +40,7 @@ static uchar prog_state = PROG_STATE_IDLE;
 uchar prog_sck = USBASP_ISP_SCK_AUTO;
 static uint32_t prog_address = 0;
 static uint16_t prog_nbytes = 0;
-static uchar prog_pagecounter = 0;
+static uint16_t prog_pagecounter = 0;
 static uchar spi_cs_hi = 1;
 static uchar mw_bitnum = 0;
 static uint16_t mw_addr = 0;
@@ -539,7 +538,6 @@ uchar usbFunctionRead(uchar *data, uchar len)
 	        }
     
         	// len уже содержит правильное количество байт для возврата.
-	        // Строка len = bytes_to_read; больше не нужна!
 	        goto exit_success;
 	}	
 
@@ -707,74 +705,76 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 	    }
 
 	    /* ---------- Flash – с extended addressing ---------- */
-	    if (prog_state == PROG_STATE_WRITEFLASH) {
-	        uint32_t addr = prog_address;
-	        uint8_t *src = data;
-	        uint8_t count = len; // Используем len напрямую
+            if (prog_state == PROG_STATE_WRITEFLASH) {
+            	uint32_t addr = prog_address;
+            	uint8_t *src = data;
+            	uint8_t count = len; 
 
-	        ispUpdateExtended(addr);
+            	ispUpdateExtended(addr);
 
-	        do {
-	            if (prog_pagesize == 0) {
-	                if (ispWriteFlash(addr, *src++, 1) != 0) { 
-	                    prog_state = PROG_STATE_IDLE;
-	                    prog_address = addr;
-	                    retVal = 0xFB;
-	                    goto exit;
-	                }
-	            } else {
-	                if (ispWriteFlash(addr, *src++, 0) != 0) { 
-	                    prog_state = PROG_STATE_IDLE;
-	                    prog_address = addr;
-	                    retVal = 0xFB;
-	                    goto exit;
-	                }
+            	do {
+                 if (prog_pagesize == 0) {
+                    if (ispWriteFlash(addr, *src++, 1) != 0) { 
+                        prog_state = PROG_STATE_IDLE;
+                        prog_address = addr;
+                        retVal = 0xFB;
+                        goto exit;
+                    }
+                } else {
+                    if (ispWriteFlash(addr, *src++, 0) != 0) { 
+                        prog_state = PROG_STATE_IDLE;
+                        prog_address = addr;
+                        retVal = 0xFB;
+                        goto exit;
+                    }
 
-	                if (--prog_pagecounter == 0) {
-	                    uint32_t page_base = addr & ~((uint32_t)prog_pagesize - 1);
-	                    if (ispFlushPage(page_base) != 0) {
-	                        prog_state = PROG_STATE_IDLE;
-	                        prog_address = addr;
-	                        retVal = 0xFA;
-	                        goto exit;
-	                    }
-	                    prog_pagecounter = prog_pagesize;
-	                }
-	            }
+                    if (--prog_pagecounter == 0) {
+                        // Передаем любой адрес страницы (например addr - 1). 
+                        // Чип все равно проигнорирует младшие биты в команде 0x4C.
+                        if (ispFlushPage(addr) != 0) {
+                            prog_state = PROG_STATE_IDLE;
+                            prog_address = addr;
+                            retVal = 0xFA;
+                            goto exit;
+                        }
+                        prog_pagecounter = prog_pagesize;
+                    }
+                }
         
-	            addr++;
+                addr++;
         
-	            if ((uint16_t)addr == 0) {
-	                ispUpdateExtended(addr);
-	            }
+                if ((uint16_t)addr == 0) {
+                   ispUpdateExtended(addr);
+                 }
 
-	        } while (--count);
+            	} while (--count);
         
-	        prog_address = addr; 
-	        prog_nbytes -= len;
+             	prog_address = addr; 
+            	prog_nbytes -= len;
 
-	        if (prog_nbytes == 0) {
-	            prog_state = PROG_STATE_IDLE;
 
-	            if (prog_pagesize != 0 && prog_pagecounter != prog_pagesize) {
-	                uint32_t last_page_base = (prog_address - 1) & ~((uint32_t)prog_pagesize - 1);
+            	if (prog_nbytes == 0) {
+                    prog_state = PROG_STATE_IDLE;
 
-	                if (ispFlushPage(last_page_base) != 0) {
-	                    retVal = 0xFA;
-	                } else {
-                    retVal = 1;
-	                }
-	            } else {
-	                retVal = 1;
-	            }
-	        } else {
-	            retVal = 0;
-	        }
+                if (prog_pagesize != 0 && prog_pagecounter != prog_pagesize) {
 
-	        goto exit;
-	}
+                    // Записываем остаток страницы
+                    if (ispFlushPage(prog_address - 1) != 0) {
+                        retVal = 0xFA;
+                    } else {
+                        retVal = 1; // Полный успех
+                    }
+                } else {
+                    retVal = 1; // Успех (без поддержки страниц или страница кратна размеру)
+                }
+            } else {
+                retVal = 0; // Блок отправлен, но это еще не конец (ждем следующие данные)
+            }
 
-	/* ---------- EEPROM ---------- */
+            goto exit;
+        } 
+        
+        /* ---------- EEPROM ---------- */
 	if (prog_state == PROG_STATE_WRITEEEPROM) {
 	        uint8_t *src = data;
 	        uint8_t count = len; // V-USB передает максимум 255 байт, uint8_t достаточно!
@@ -808,48 +808,49 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 
 int main(void) {
 
+    // 1. САМОЕ ПЕРВОЕ ДЕЛО: запускаем таймер! 
+    // Это позволит нам использовать clockWait() вместо тяжелой _delay_ms()
+    clockInit();
+
     /* no pullups on USB and ISP pins */
     PORTD = 0;
     PORTB = 0;
     
     /* Output SE0 for USB reset */
-    /* aleh: i.e. both D+ and D- should be low. */
     PORTB &= ~((1 << PB1) | (1 << PB0)); // D+ и D- = 0
     DDRB |= (1 << PB1) | (1 << PB0); 	 // выходы, low	
-    /* aleh: there was a delay loop here instead which probably would still work, I've put this when was debugging. */
-    _delay_ms(63);           // >10 мс (USB 2.0 spec)
+    
+    // Ждем 63 мс (200 * 320us = 64 мс)
+    clockWait(200);           
     DDRB = 0;                // возвращаем во входы
 
     /* Инициализация порта C: светодиоды и подтяжки для входов */
-    DDRC = (1 << PC0) | (1 << PC1);  // Только PC0 и PC1 как выходы
+    DDRC = (1 << PC0) | (1 << PC1);  
     DDRC &= ~(1 << PC2);
-    //   PORTC = (1 << PC0) | (1 << PC1); // Светодиоды выключены (общий анод)
-    // Включим подтяжки для остальных пинов, включая PC2
     PORTC |= (1 << PC2) | (1 << PC3) | (1 << PC4) | (1 << PC5);
    
     /* ----------- индикация ----------- */
 
     ledRedOn();
-    _delay_ms(127);
+    // Ждем 127 мс (2 раза по 200 * 320us = 128 мс)
+    clockWait(200);
+    clockWait(200);
+    
     ledRedOff();
     ledGreenOn();  
-    _delay_ms(127);  
+    clockWait(200);
+    clockWait(200);
+    
     ledGreenOff();
     ledRedOn();
    
     /* ----------- USB ----------- */
-    /* init timer */
-    clockInit();
-    
-    /* main event loop */
     usbInit();
 
     sei();
 
-  for (;;) {
-
+    for (;;) {
         usbPoll();
-
     }
     return 0;
 }

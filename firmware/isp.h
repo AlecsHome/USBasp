@@ -37,7 +37,12 @@
 #define CS_HI()		ISP_OUT |= (1 << ISP_RST); /* RST high */
 
 extern uchar (*ispTransmit)(uchar);
+
 extern uchar prog_address_newmode;
+extern uchar isp_hiaddr;
+extern uint8_t last_success_speed;
+extern uchar prog_sck;
+extern uint8_t user_speed_requested; 
 
 /* Prepare connection to target device */
 void ispConnect();
@@ -78,12 +83,6 @@ void ispSetSCKOption(uchar option);
 void spibusy(void);
 
 void ispUpdateExtended(uint32_t address);
-
-extern uint8_t last_success_speed; // объ€вление, а не определение
-
-extern uchar isp_hiaddr;
-
-extern uint8_t user_speed_requested; 
 
 #endif /* __isp_h_included__ */
 
