@@ -18,26 +18,28 @@ uint8_t last_success_speed = USBASP_ISP_SCK_3000;
 // Твой макрос отличный, оставляем! Он генерирует самый короткий код.
 #define GET_EXT_ADDR(address) (((uint8_t*)&(address))[2] >> 1)
 
-// Таблицы скоростей для аппаратного SPI
+// Базовые биты для включения SPI в режиме Master
+#define SPI_BASE ((1 << SPE) | (1 << MSTR))
+
+// ИСПРАВЛЕННЫЕ таблицы скоростей для аппаратного SPI (для кварца 12 МГц)
+// SPCR: биты SPR1, SPR0
 static const uchar hw_spcr_table[] PROGMEM = {
-    (1 << SPE) | (1 << MSTR),                                  // 3.0 MHz
-    (1 << SPE) | (1 << MSTR) | (1 << SPR0),                    // 1.5 MHz
-    (1 << SPE) | (1 << MSTR) | (1 << SPR0),                    // 0.75 MHz
-    (1 << SPE) | (1 << MSTR) | (1 << SPR1),                    // 0.375 MHz
-    (1 << SPE) | (1 << MSTR) | (1 << SPR1),                    // 0.1875 MHz
-    (1 << SPE) | (1 << MSTR) | (1 << SPR1) | (1 << SPR0)       // 0.09375 MHz
+    0,                                      // 3.0 MHz   (Fosc/4,  SPI2X=0)
+    0,                                      // 1.5 MHz   (Fosc/8,  SPI2X=1)
+    (1 << SPR0),                            // 0.75 MHz  (Fosc/16, SPI2X=0)
+    (1 << SPR0),                            // 0.375 MHz (Fosc/32, SPI2X=1)
+    (1 << SPR1),                            // 0.1875 MHz(Fosc/64, SPI2X=0)
+    (1 << SPR1) | (1 << SPR0)               // 0.09375 MHz(Fosc/128,SPI2X=0)
 };
 
-// Бит 6 = SPE (SPI Enable), Бит 4 = MSTR (Master Mode)
-#define SPI_BASE (1 << SPE) | (1 << MSTR)
-
+// SPSR: содержит ТОЛЬКО бит SPI2X (бит 0)
 static const uchar hw_spsr_table[] PROGMEM = {
-    SPI_BASE | 0x00, // 3 MHz   (SPR1=0, SPR0=0) -> 0x50
-    SPI_BASE | 0x01, // 1.5 MHz (SPR1=0, SPR0=1) -> 0x51
-    SPI_BASE | 0x01, // 750 kHz (SPR1=0, SPR0=1) -> 0x51
-    SPI_BASE | 0x02, // 375 kHz (SPR1=1, SPR0=0) -> 0x52
-    SPI_BASE | 0x02, // 187.5 kHz(SPR1=1, SPR0=0) -> 0x52
-    SPI_BASE | 0x03  // 93.75 kHz(SPR1=1, SPR0=1) -> 0x53
+    0,                  // 3.0 MHz   (SPI2X = 0)
+    (1 << SPI2X),       // 1.5 MHz   (SPI2X = 1)
+    0,                  // 0.75 MHz  (SPI2X = 0)
+    (1 << SPI2X),       // 0.375 MHz (SPI2X = 1)
+    0,                  // 0.1875 MHz(SPI2X = 0)
+    0                   // 0.09375 MHz(SPI2X = 0)
 };
 
 // Таблица задержек для Software SPI
@@ -56,13 +58,11 @@ static const uchar isp_retry_speeds[] PROGMEM = {
 volatile uint8_t sck_sw_delay = 0;
 uchar isp_hiaddr = 0xFF;
 
-// Убраны глобальные sck_spcr и sck_spsr. Настраиваем напрямую!
 static inline void spiHWdisable() {
     SPCR = 0;
 }
 
 void ispSetSCKOption(uchar option) {
-
     // 1. Обработка AUTO
     if (option == USBASP_ISP_SCK_AUTO) {
         user_speed_requested = 0;
@@ -82,22 +82,29 @@ void ispSetSCKOption(uchar option) {
     // Сохраняем текущую скорость глобально (для запросов avrdude)
     prog_sck = option;
 
-    // 3. Hardware SPI (93.75 kHz ... 3.0 MHz)
+    // 3. Настройка Hardware SPI (93.75 kHz ... 3.0 MHz, опции 8..13)
     if (option >= USBASP_ISP_SCK_93_75) {
-        uint8_t idx = USBASP_ISP_SCK_3000 - option;  // 13→0, 8→5
+        uint8_t idx = USBASP_ISP_SCK_3000 - option; // 13->0, ..., 8->5
         
         if (idx < sizeof(hw_spcr_table)) {
-            // Пишем значения напрямую. В таблице уже есть биты SPE и MSTR.
-            SPCR = pgm_read_byte(&hw_spcr_table[idx]);
-            SPSR = pgm_read_byte(&hw_spsr_table[idx]);
+            // Читаем только биты делителя из SPCR и бит SPI2X из SPSR
+            uint8_t spcr_bits = pgm_read_byte(&hw_spcr_table[idx]);
+            uint8_t spsr_bits = pgm_read_byte(&hw_spsr_table[idx]);
+            
+            // Полная и безопасная инициализация регистров
+            SPCR = SPI_BASE | spcr_bits;
+            SPSR = spsr_bits;
         } else {
-            // Fallback (на всякий случай)
-            SPCR = (1 << SPE) | (1 << MSTR) | (1 << SPR0);
+            // Fallback (теоретически недостижимо)
+            SPCR = SPI_BASE | (1 << SPR0);
             SPSR = (1 << SPI2X);
         }
         
+        // Переключаем на HW SPI
         ispTransmit = (uchar (*)(uchar))ispTransmit_hw;
-        sck_sw_delay = 0; // Для HW SPI задержка не нужна
+        
+        // ОБЯЗАТЕЛЬНО 0, чтобы avrdude не выводил "[SW delay: 1]"
+        sck_sw_delay = 0; 
     } 
     // 4. Настройка Software SPI (0.5 kHz ... 32 kHz, опции 1..7)
     else if (option >= USBASP_ISP_SCK_0_5) {
@@ -117,12 +124,11 @@ void ispSetSCKOption(uchar option) {
         ispTransmit = ispTransmit_sw;
     }
     
-    // 5. Обновляем кэш успешной скорости
-    if (option != USBASP_ISP_SCK_AUTO) {
-        last_success_speed = option;
-    }
+    // 5. УБРАНО ОБНОВЛЕНИЕ КЭША!
+    // Кэш last_success_speed должен обновляться только при успешном 
+    // выполнении ispEnterProgrammingMode(), так как здесь мы не знаем,
+    // смог ли целевой чип реально работать на этой скорости.
 }
-
 // --- Задержка ---
 void ispDelay() {
     
@@ -219,48 +225,59 @@ static uchar tryEnterProgMode(uchar speed_code) {
     return 1;
 }
 
-uchar ispEnterProgrammingMode(void) {
+uint8_t ispEnterProgrammingMode(void) {
     uint8_t start_idx = 0;
+    // Используем skip_speed ТОЛЬКО для кэша (AUTO режима)
+    uint8_t skip_speed = USBASP_ISP_SCK_AUTO; 
 
     // 1. Если пользователь задал скорость принудительно
     if (user_speed_requested) {
-        // Пытаемся войти с заданной скоростью
+        user_speed_requested = 0; // Сбрасываем флаг сразу
+        
         if (tryEnterProgMode(prog_sck) == 0) {
             last_success_speed = prog_sck;
             return 0; // Успех
         }
         
-        // Скорость не подошла. Ищем её позицию в таблице
+        // Скорость не подошла. Ищем следующую (более медленную) в таблице.
         for (uint8_t i = 0; i < ISP_SPEED_CNT; i++) {
             if (GET_SPEED(i) == prog_sck) {
-                start_idx = i + 1;
+                start_idx = i + 1; // Начинаем перебор со следующей
                 break;
             }
         }
         
-        // ЗАЩИТА ОТ КРАЕВОГО СЛУЧАЯ: Если была запрошена самая медленная скорость,
-        // start_idx выйдет за пределы таблицы. Сбрасываем в 0 для полного сканирования.
+        // ЗАЩИТА: Если была запрошена самая медленная скорость,
+        // start_idx выйдет за границы. Сбрасываем в начало (на самую быструю).
         if (start_idx >= ISP_SPEED_CNT) {
-            start_idx = 0;
+            start_idx = 0; 
         }
-        
-        // Сбрасываем флаг, так как переходим в режим перебора
-        user_speed_requested = 0;
+        // ПРИМЕЧАНИЕ: Нам не нужен skip_speed здесь. Цикл начнется с start_idx 
+        // и естественным образом никогда не дойдет до проваленной пользовательской скорости.
     }
-    
-    // 2. Режим AUTO: пробуем последнюю удачную скорость (только если start_idx == 0)
-    if (start_idx == 0 && last_success_speed != USBASP_ISP_SCK_AUTO) {
-        if (tryEnterProgMode(last_success_speed) == 0) {
-            return 0; // Успех
+    else {
+        // 2. Режим AUTO: пробуем последнюю удачную скорость (кэш)
+        if (last_success_speed != USBASP_ISP_SCK_AUTO) {
+            if (tryEnterProgMode(last_success_speed) == 0) {
+                return 0; // Успех
+            }
+            
+            // Кэш не сработал. Запоминаем его, чтобы цикл перебора не тратил на него время.
+            skip_speed = last_success_speed;
+            // Сбрасываем кэш
+            last_success_speed = USBASP_ISP_SCK_AUTO;
         }
-        
-        // Если кэш не сработал, сбрасываем его
-        last_success_speed = USBASP_ISP_SCK_AUTO;
+        // В режиме AUTO start_idx остается 0 (начинаем с самой быстрой)
     }
     
     // 3. Полный перебор скоростей (Brute-force)
     for (uint8_t i = start_idx; i < ISP_SPEED_CNT; i++) {
         uint8_t speed = GET_SPEED(i);
+        
+        // Пропускаем ТОЛЬКО ту скорость, которая не сработала из кэша
+        if (speed == skip_speed) {
+            continue;
+        }
         
         if (tryEnterProgMode(speed) == 0) {
             // Нашли рабочую скорость, сохраняем в кэш

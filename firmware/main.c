@@ -704,75 +704,75 @@ uchar usbFunctionWrite(uchar *data, uchar len)
 	        goto exit;
 	    }
 
-	    /* ---------- Flash – с extended addressing ---------- */
-            if (prog_state == PROG_STATE_WRITEFLASH) {
-            	uint32_t addr = prog_address;
-            	uint8_t *src = data;
-            	uint8_t count = len; 
+            /* ---------- Flash – с extended addressing ---------- */
+	    if (prog_state == PROG_STATE_WRITEFLASH) {
+		    uint32_t addr = prog_address;
+		    uint8_t *src = data;
+		    uint8_t count = len; 
+		    uint8_t errCode = 0; // 0 - нет ошибки
 
-            	ispUpdateExtended(addr);
+		    ispUpdateExtended(addr);
 
-            	do {
-                 if (prog_pagesize == 0) {
-                    if (ispWriteFlash(addr, *src++, 1) != 0) { 
-                        prog_state = PROG_STATE_IDLE;
-                        prog_address = addr;
-                        retVal = 0xFB;
-                        goto exit;
-                    }
-                } else {
-                    if (ispWriteFlash(addr, *src++, 0) != 0) { 
-                        prog_state = PROG_STATE_IDLE;
-                        prog_address = addr;
-                        retVal = 0xFB;
-                        goto exit;
-                    }
+	    do {
+	        if (prog_pagesize == 0) {
+	            if (ispWriteFlash(addr, *src++, 1) != 0) { 
+	                errCode = 0xFB;
+	                break;
+	            }
+	        } else {
+	            if (ispWriteFlash(addr, *src++, 0) != 0) { 
+	                errCode = 0xFB;
+	                break;
+	            }
 
-                    if (--prog_pagecounter == 0) {
-                        // Передаем любой адрес страницы (например addr - 1). 
-                        // Чип все равно проигнорирует младшие биты в команде 0x4C.
-                        if (ispFlushPage(addr) != 0) {
-                            prog_state = PROG_STATE_IDLE;
-                            prog_address = addr;
-                            retVal = 0xFA;
-                            goto exit;
-                        }
-                        prog_pagecounter = prog_pagesize;
-                    }
-                }
-        
-                addr++;
-        
-                if ((uint16_t)addr == 0) {
-                   ispUpdateExtended(addr);
-                 }
+	            if (--prog_pagecounter == 0) {
+	                if (ispFlushPage(addr) != 0) { // addr здесь внутри цикла - это нормально
+	                    errCode = 0xFA;
+	                    break;
+	                }
+	                prog_pagecounter = prog_pagesize;
+	            }
+	        }
+    
+	        addr++;
+    
+	        if ((uint16_t)addr == 0) {
+	           ispUpdateExtended(addr);
+	          }
 
-            	} while (--count);
-        
-             	prog_address = addr; 
-            	prog_nbytes -= len;
+	    	} while (--count);
+    
+	    	// Единая точка выхода из цикла при ошибке
+	    	if (errCode) {
+		        prog_state = PROG_STATE_IDLE;
+		        prog_address = addr; 
+		        retVal = errCode;
+		        goto exit;
+		    }
 
+	    		prog_address = addr; 
+	    		prog_nbytes -= len;
 
-            	if (prog_nbytes == 0) {
-                    prog_state = PROG_STATE_IDLE;
+	    	if (prog_nbytes == 0) {
+	        	prog_state = PROG_STATE_IDLE;
 
-                if (prog_pagesize != 0 && prog_pagecounter != prog_pagesize) {
+	        if (prog_pagesize != 0 && prog_pagecounter != prog_pagesize) {
+	            	// ВАЖНО: Именно минус 1, чтобы указать на последний записанный байт
+	            	// и не перескочить на следующую страницу. Underflow невозможен.
+	            	if (ispFlushPage(prog_address - 1) != 0) {
+	                	retVal = 0xFA;
+	            	} else {
+	                	retVal = 1; // Полный успех
+	            	   }
+	        	} else {
+	            	 retVal = 1; // Успех
+	        	}
+	    	    } else {
+	           retVal = 0; // Ждем следующие данные
+	    	}
 
-                    // Записываем остаток страницы
-                    if (ispFlushPage(prog_address - 1) != 0) {
-                        retVal = 0xFA;
-                    } else {
-                        retVal = 1; // Полный успех
-                    }
-                } else {
-                    retVal = 1; // Успех (без поддержки страниц или страница кратна размеру)
-                }
-            } else {
-                retVal = 0; // Блок отправлен, но это еще не конец (ждем следующие данные)
-            }
-
-            goto exit;
-        } 
+	    goto exit;
+	} 
         
         /* ---------- EEPROM ---------- */
 	if (prog_state == PROG_STATE_WRITEEEPROM) {
