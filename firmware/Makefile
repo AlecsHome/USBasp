@@ -62,8 +62,15 @@ SRC += tpi.S
 #CFLAGS += -fexec-charset=CP866 -finput-charset=UTF-8
 
 #COMPILE = avr-gcc -Wall -Wextra -Os -flto -std=gnu99 -Iusbdrv -I. -mmcu=$(TARGET) # -DDEBUG_LEVEL=2
-COMPILE = avr-gcc -Wall -Wextra -Os -std=gnu99 -Iusbdrv -I. -mmcu=$(TARGET) -ffunction-sections -fdata-sections -Wl,--gc-sections
-COMPILE += -fno-jump-tables -fno-tree-switch-conversion -funsigned-char -fpack-struct
+# Опции компилятора
+CFLAGS  = -Wall -Wextra -Os -std=gnu99 -Iusbdrv -I. -mmcu=$(TARGET)
+CFLAGS += -flto -ffunction-sections -fdata-sections -mrelax
+CFLAGS += -fno-jump-tables -fno-tree-switch-conversion -funsigned-char -fpack-struct
+
+# Опции линковщика
+LDFLAGS = -Wl,--gc-sections -Wl,--relax -flto
+
+COMPILE = avr-gcc $(CFLAGS)
 
 OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o usbdrv/oddebug.o isp.o clock.o tpi.o main.o i2c.o microwire.o 
 
