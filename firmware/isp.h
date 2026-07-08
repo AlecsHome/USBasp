@@ -38,11 +38,14 @@
 
 extern uchar (*ispTransmit)(uchar);
 
+extern uint16_t prog_pagesize;
 extern uchar prog_address_newmode;
 extern uchar isp_hiaddr;
 extern uint8_t last_success_speed;
 extern uchar prog_sck;
 extern uint8_t user_speed_requested; 
+extern uint32_t prog_address;
+extern uint16_t prog_address_high; // <--- Добавить это!
 
 /* Prepare connection to target device */
 void ispConnect();

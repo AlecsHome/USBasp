@@ -38,7 +38,8 @@ static inline uint8_t min_u8_u16(uint8_t a, uint16_t b) {
 static uchar replyBuffer[8] = {0};
 static uchar prog_state = PROG_STATE_IDLE;
 uchar prog_sck = USBASP_ISP_SCK_AUTO;
-static uint32_t prog_address = 0;
+uint32_t prog_address = 0;
+uint16_t prog_address_high = 0; // <--- Добавить это!
 static uint16_t prog_nbytes = 0;
 static uint16_t prog_pagecounter = 0;
 static uchar spi_cs_hi = 1;
@@ -46,7 +47,7 @@ static uchar mw_bitnum = 0;
 static uint16_t mw_addr = 0;
 static uint8_t mw_opcode = 0;
 static uint8_t mw_cmd_sent = 0; // <--- ДОБАВИТЬ
-static uint16_t prog_pagesize = 0;
+uint16_t prog_pagesize = 0;
 static uint8_t rc = 0;
 static uint8_t i2c_dev_addr = 0xFF;
 uint8_t user_speed_requested = 0;
@@ -65,11 +66,17 @@ extern uchar sck_sw_delay;
 
 /* -------------------------------------------------------------------------------- */
 static void setupTransfer(uint8_t *data, uint8_t new_state) {
+    uint16_t low_addr = ((uint16_t)data[3] << 8) | data[2];
     
-    if (!prog_address_newmode)
-        prog_address = (data[3] << 8) | data[2];	
+    if (prog_address_newmode) {
+        // Новая логика: склеиваем с тем, что прислал SETLONGADDRESS
+        prog_address = ((uint32_t)prog_address_high << 16) | low_addr;
+    } else {
+        // Старая логика: просто 16 бит (для ATmega8, ATtiny и т.д.)
+        prog_address = low_addr;
+    }
 
-    prog_nbytes  = (data[7] << 8) | data[6];
+    prog_nbytes  = ((uint16_t)data[7] << 8) | data[6];
     prog_state   = new_state;
 }
 
@@ -132,6 +139,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 	  
 	  /* set compatibility mode of address delivering */
 	  prog_address_newmode = 0;
+	  prog_address_high = 0;
 
     	  ledRedOn();
     	  ispConnect();
@@ -298,55 +306,50 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 
 
 	} else if (data[1] == USBASP_FUNC_WRITEFLASH) {
-            	
-            	if (!prog_address_newmode)
-        	prog_address = (data[3] << 8) | data[2];
-                            	
-            	// СТАРАЯ ОШИБКА: prog_pagesize = data[4] + (((unsigned int)data[5] & 0xF0) << 4);
+        
+            uint16_t low_addr = ((uint16_t)data[3] << 8) | data[2];
+            // Магия: если newmode нет, prog_address_high просто равен 0
+            prog_address = ((uint32_t)prog_address_high << 16) | low_addr;
+    
+            prog_nbytes = ((uint16_t)data[7] << 8) | data[6];
+    
+            if ((prog_address & 0x1FF) == 0) {
+                prog_pagesize = 256; 
+            } else {
+                prog_pagesize = 128; 
+            }
+    
+            prog_pagecounter = prog_pagesize;  
+            prog_state = PROG_STATE_WRITEFLASH;
+            len = USB_NO_MSG;
+
+    	} else if (data[1] == USBASP_FUNC_WRITEEEPROM) {
             
-            	// ИСПРАВЛЕНО: Читаем чистые 16 бит из wIndex
-            	prog_pagesize = data[4] | ((unsigned int)data[5] << 8);
-            	prog_pagecounter = prog_pagesize;  
-            	prog_nbytes = (data[7] << 8) | data[6];
-            	prog_state = PROG_STATE_WRITEFLASH;
-            	len = USB_NO_MSG;
+            uint16_t low_addr = ((uint16_t)data[3] << 8) | data[2];
+            // Точно такая же магия. Никаких if (!prog_address_newmode)!
+            prog_address = ((uint32_t)prog_address_high << 16) | low_addr;
+            
+            prog_pagesize = 0;
+            prog_nbytes = ((uint16_t)data[7] << 8) | data[6];
+            prog_state = PROG_STATE_WRITEEEPROM;
+            len = USB_NO_MSG;
 
-	} else if (data[1] == USBASP_FUNC_WRITEEEPROM) {
-    		
-    		if (!prog_address_newmode)
-        	 prog_address = (data[3] << 8) | data[2];
-    		
-    		prog_pagesize = 0;
-    		prog_nbytes = (data[7] << 8) | data[6];
-    		prog_state = PROG_STATE_WRITEEEPROM;
-    		len = USB_NO_MSG;
-
-	} else if (data[1] == USBASP_FUNC_SETLONGADDRESS) {  // Функция 9
-
+	} else if (data[1] == USBASP_FUNC_SETLONGADDRESS) {
+    		// Собираем полный 32-битный адрес безопасно (без указателей)
+    		uint32_t addr = ((uint32_t)data[5] << 24) | ((uint32_t)data[4] << 16) | 
+                    ((uint32_t)data[3] << 8)  | (uint32_t)data[2];
+    
+    		// Включаем режим расширенной адресации
     		prog_address_newmode = 1;
+    
+    		// Запоминаем ТОЛЬКО старшую часть (она нам пригодится в READ/WRITE)
+    		prog_address_high = (uint16_t)(addr >> 16);
+    
+    		// Отправляем команду 0x4D в целевой чип (для Flash)
+    		ispUpdateExtended(addr);
 
-    		/*
-    		* ПРАВИЛЬНЫЙ разбор V-USB:
-    		* data[2], data[3] - wValue (МЛАДШИЕ 16 бит адреса)
-    		* data[4], data[5] - wIndex (СТАРШИЕ 16 бит адреса)
-    		*/
-    		//uint32_t addr = ((uint32_t)data[5] << 24) |  // wIndex high (старший байт)
-                //	    	  ((uint32_t)data[4] << 16) |  // wIndex low
-                //    		  ((uint32_t)data[3] << 8)  |  // wValue high
-                //    		  (uint32_t)data[2];           // wValue low (младший байт)
-
-    		// Сохраняем адрес
-    		//prog_address = addr;
-    		//в оригинальной прошке это делалось элегантнее одной строкой:
-    		prog_address = *((unsigned long*) &data[2]);
-    		// потому что архитектура AVR little-endian, и байты в памяти лежат ровно так, 
-    		// как нужно для 32-битного числа.
-
-    		// ИСПОЛЬЗУЕМ СУЩЕСТВУЮЩУЮ ФУНКЦИЮ!
-    		ispUpdateExtended(prog_address);
-
-    		replyBuffer[0] = 0;  // Успех
-    		len = 1;
+    		replyBuffer[0] = 0;
+	    	len = 1;
 
 	/* Обработчик USB-команды SETISPSCK (уже есть, но проверим) */
 	} else if (data[1] == USBASP_FUNC_SETISPSCK) {
