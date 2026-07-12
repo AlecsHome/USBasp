@@ -64,15 +64,19 @@ SRC += tpi.S
 #COMPILE = avr-gcc -Wall -Wextra -Os -flto -std=gnu99 -Iusbdrv -I. -mmcu=$(TARGET) # -DDEBUG_LEVEL=2
 # Опции компилятора
 CFLAGS  = -Wall -Wextra -Os -std=gnu99 -Iusbdrv -I. -mmcu=$(TARGET)
-CFLAGS += -flto -ffunction-sections -fdata-sections -mrelax
-CFLAGS += -fno-jump-tables -fno-tree-switch-conversion -funsigned-char -fpack-struct
+CFLAGS += -flto -ffunction-sections -fdata-sections
+CFLAGS += -fno-jump-tables 
+CFLAGS += -fmerge-all-constants
+
+# Не разделяет wide-типы (uint32_t остаётся в регистрах парах, меньше mov)
+CFLAGS += -fno-split-wide-types 
 
 # Опции линковщика
 LDFLAGS = -Wl,--gc-sections -Wl,--relax -flto
 
 COMPILE = avr-gcc $(CFLAGS)
 
-OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o usbdrv/oddebug.o isp.o clock.o tpi.o main.o i2c.o microwire.o 
+OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o isp.o clock.o tpi.o main.o i2c.o microwire.o #spi25.o usbdrv/oddebug.o
 
 .c.o:
 	$(COMPILE) -c $< -o $@
@@ -93,7 +97,7 @@ clean:
 
 # file targets:
 main.bin:	$(OBJECTS)
-	$(COMPILE) -o main.bin $(OBJECTS) -Wl,-Map,main.map -Wl,--relax
+	$(COMPILE) $(OBJECTS) $(LDFLAGS) -Wl,-Map,main.map -o main.bin
 
 main.hex:	main.bin
 	rm -f main.hex main.eep.hex

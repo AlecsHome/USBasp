@@ -32,18 +32,19 @@
 #define USBASP_FUNC_TPI_WRITEBLOCK   	16
 #define USBASP_FUNC_GETISPSCK        	17
 
-#define USBASP_FUNC_SPI_CONNECT		50
-#define USBASP_FUNC_SPI_READ		51
-#define USBASP_FUNC_SPI_WRITE		52
+#define USBASP_FUNC_SPI_CONNECT		50  // AsProgrammer использует это
+#define USBASP_FUNC_SPI_READ		51  // AsProgrammer использует это
+#define USBASP_FUNC_SPI_WRITE		52  // AsProgrammer использует это
 
-#define USBASP_FUNC_I2C_INIT         	70
-#define USBASP_FUNC_I2C_READ     	71   // или какой у вас реальный номер
-#define USBASP_FUNC_I2C_WRITE    	72   // или какой у вас реальный номер
+// ЛИШНИЕ НУЛИ В НАЧАЛЕ НЕ НУЖНЫ, используем обычные десятичные!
+#define USBASP_FUNC_I2C_INIT         	70  
+#define USBASP_FUNC_I2C_READ     	71  
+#define USBASP_FUNC_I2C_WRITE    	72  
 #define USBASP_FUNC_I2C_START           73
 #define USBASP_FUNC_I2C_STOP            74
 #define USBASP_FUNC_I2C_READ_BYTE       75
 #define USBASP_FUNC_I2C_WRITE_BYTE      76
-#define USBASP_FUNC_I2C_SETDEVICE       77
+#define USBASP_FUNC_I2C_SETDEVICE       77  // <--- Убрали дублирующийся 0x58!
 
 #define USBASP_FUNC_MW_TRANSMIT 	90
 #define USBASP_FUNC_MW_READ		92
@@ -54,9 +55,11 @@
 #define USBASP_FUNC_GETCAPABILITIES     127
 
 // USBASP capabilities
-#define USBASP_CAP_0_TPI        	0x01   // бит 0 байта 0
-#define USBASP_CAP_0_I2C        	0x02   // бит 1 байта 0
-#define USBASP_CAP_0_MW         	0x10   // бит 4 байта 0
+// В usbasp.h
+#define USBASP_CAP_0_TPI   		0x01
+#define USBASP_CAP_0_I2C   		0x02
+#define USBASP_CAP_0_MW    		0x04
+//#define USBASP_CAP_0_UPDI  		0x08  // <-- ДОБАВИТЬ ЭТОТ ФЛАГ
 
 #define USBASP_CAP_1_SCK_AUTO   	0x01   // бит 0 байта 1
 #define USBASP_CAP_1_HW_SCK     	0x80   // бит 7 байта 1

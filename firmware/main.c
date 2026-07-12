@@ -52,7 +52,8 @@ static uint8_t rc = 0;
 static uint8_t i2c_dev_addr = 0xFF;
 uint8_t user_speed_requested = 0;
 uint8_t prog_address_sent = 0;
-uchar prog_address_newmode = 0;
+volatile uchar prog_address_newmode = 0;
+
 // Объявления ассемблерных функций
 extern void tpi_init(void);
 extern void tpi_send_byte(uint8_t data);
@@ -98,6 +99,7 @@ static void setupMicrowireOperation(uint8_t *data, uint8_t new_state) {
 
 static void clearReplyBuffer(void) {
     memset(replyBuffer, 0, 8); // Намного компактнее, чем 8 присваиваний
+//    memset(&replyBuffer[0], 0, sizeof(replyBuffer));
 }
 
 
@@ -152,8 +154,116 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 
            replyBuffer[0] = rc;
 	   len = 1;
+
+	} else if (data[1] == USBASP_FUNC_DISCONNECT) {
+		ispDisconnect();
+		ledGreenOff();
+
+//------------------------------------------------------------------------------------------
+
+	} else if (data[1] == USBASP_FUNC_TRANSMIT) {
+		replyBuffer[0] = ispTransmit(data[2]);
+		replyBuffer[1] = ispTransmit(data[3]);
+		replyBuffer[2] = ispTransmit(data[4]);
+		replyBuffer[3] = ispTransmit(data[5]);
+		// ОЧИСТИТЬ остальные байты!
+        	replyBuffer[4] = 0;
+        	replyBuffer[5] = 0;
+        	replyBuffer[6] = 0;
+        	replyBuffer[7] = 0;
+		len = 4;
+
+	} else if (data[1] == USBASP_FUNC_ENABLEPROG) {
+        	replyBuffer[0] = ispEnterProgrammingMode();
+		len = 1;
+
+	} else if (data[1] == USBASP_FUNC_READFLASH) {
+    		setupTransfer(data, PROG_STATE_READFLASH);
+    		len = USB_NO_MSG;
+
+	} else if (data[1] == USBASP_FUNC_READEEPROM) {
+    		setupTransfer(data, PROG_STATE_READEEPROM);
+    		len = USB_NO_MSG;
+
+
+    	} else if (data[1] == USBASP_FUNC_WRITEFLASH) {
+            uint16_t low_addr = ((uint16_t)data[3] << 8) | data[2];
+            prog_address = ((uint32_t)prog_address_high << 16) | low_addr;
+    
+            // Берем точный размер страницы от Avrdude (стандарт протокола!)
+            prog_pagesize = ((uint16_t)data[5] << 8) | data[4];
+    
+            prog_nbytes = ((uint16_t)data[7] << 8) | data[6];
+            prog_pagecounter = prog_pagesize;  
+    
+            prog_state = PROG_STATE_WRITEFLASH;
+            len = USB_NO_MSG;
+
+    	} else if (data[1] == USBASP_FUNC_WRITEEEPROM) {
+            
+            uint16_t low_addr = ((uint16_t)data[3] << 8) | data[2];
+            // Точно такая же магия. Никаких if (!prog_address_newmode)!
+            prog_address = ((uint32_t)prog_address_high << 16) | low_addr;
+            
+            prog_pagesize = 0;
+            prog_nbytes = ((uint16_t)data[7] << 8) | data[6];
+            prog_state = PROG_STATE_WRITEEEPROM;
+            len = USB_NO_MSG;
+
+	} else if (data[1] == USBASP_FUNC_SETLONGADDRESS) {
+            // Собираем полный 32-битный адрес безопасно
+            uint32_t addr = ((uint32_t)data[5] << 24) | ((uint32_t)data[4] << 16) | 
+                    ((uint32_t)data[3] << 8)  | (uint32_t)data[2];
+    
+            // Включаем режим расширенной адресации
+            prog_address_newmode = 1;
+    
+            // Запоминаем ТОЛЬКО старшую часть
+            prog_address_high = (uint16_t)(addr >> 16);
+    
+            // Отдаем компилятору полную свободу действий.
+            // С -flto он сам соптимизирует эту функцию лучше нас!
+            ispUpdateExtended(addr);
+
+            replyBuffer[0] = 0;
+        	len = 1;
+
+	/* Обработчик USB-команды SETISPSCK (уже есть, но проверим) */
+	} else if (data[1] == USBASP_FUNC_SETISPSCK) {
+    		prog_sck = data[2];  // data[2] содержит код скорости (1-16)
+    
+    		if (prog_sck == USBASP_ISP_SCK_AUTO) {  // 0 = AUTO
+	        user_speed_requested = 0;
+		    } else {
+		        user_speed_requested = 1;
+		    }
+    
+		replyBuffer[0] = 0;
+    		len = 1;
+
+	} else if (data[1] == USBASP_FUNC_GETISPSCK) {
+    		replyBuffer[0] = 0;
+    		replyBuffer[1] = prog_sck;           // текущая установленная скорость
+    		replyBuffer[2] = last_success_speed; // предыдущая успешная скорость
+    		replyBuffer[3] = sck_sw_delay;
+    		replyBuffer[4] = isp_hiaddr;
+    		replyBuffer[5] = prog_state;
+    		// ОЧИСТИТЬ остальные!
+        	replyBuffer[6] = 0;
+        	replyBuffer[7] = 0;
+    		len = 6;
+
+	} else if (data[1] == USBASP_FUNC_GETCAPABILITIES) {
+		replyBuffer[0] = USBASP_CAP_0_TPI | USBASP_CAP_0_I2C | USBASP_CAP_0_MW;
+		replyBuffer[1] = USBASP_CAP_1_SCK_AUTO | USBASP_CAP_1_HW_SCK;
+		replyBuffer[2] = 0;
+		replyBuffer[3] = USBASP_CAP_3_FLASH | USBASP_CAP_3_EEPROM |
+                 		 USBASP_CAP_3_FUSES | USBASP_CAP_3_LOCKBITS |
+                 		 USBASP_CAP_3_EXTENDED_ADDR | USBASP_CAP_3MHZ;          // 0x40 – никаких сдвигов    
+    		len = 4;
 								
 //spi ----------------------------------------------------------------------------------------
+
 	} else if (data[1] == USBASP_FUNC_SPI_CONNECT) {
 		ispSetSCKOption(prog_sck);
 		ledRedOn();
@@ -168,6 +278,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
     		len = USB_NO_MSG;
     	
 //i2c 24xx ------------------------------------------------------------------------------------
+
     	} else if (data[1] == USBASP_FUNC_I2C_INIT) {
         	ledRedOn();
             	i2c_init();
@@ -242,6 +353,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
              	len = 1;
 
 //microwire 93xx ---------------------------------------------------------------------------------------------
+
 	// ТУТ ВСЕ ОСТАЕТСЯ КАК БЫЛО - после исправления mwSendData в microwire.c этот код работает корректно
     	} else if (data[1] == USBASP_FUNC_MW_WRITE) {
             	setupMicrowireOperation(data, PROG_STATE_MW_WRITE);
@@ -274,109 +386,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
             	len = (n > 4) ? 4 : n;
             	// replyBuffer уже заполнен
 
-//------------------------------------------------------------------------------------------
-	
-	} else if (data[1] == USBASP_FUNC_DISCONNECT) {
-		ispDisconnect();
-		ledGreenOff();
-
-	} else if (data[1] == USBASP_FUNC_TRANSMIT) {
-		replyBuffer[0] = ispTransmit(data[2]);
-		replyBuffer[1] = ispTransmit(data[3]);
-		replyBuffer[2] = ispTransmit(data[4]);
-		replyBuffer[3] = ispTransmit(data[5]);
-		// ОЧИСТИТЬ остальные байты!
-        	replyBuffer[4] = 0;
-        	replyBuffer[5] = 0;
-        	replyBuffer[6] = 0;
-        	replyBuffer[7] = 0;
-		len = 4;
-
-	} else if (data[1] == USBASP_FUNC_ENABLEPROG) {
-        	replyBuffer[0] = ispEnterProgrammingMode();
-		len = 1;
-
-	} else if (data[1] == USBASP_FUNC_READFLASH) {
-    		setupTransfer(data, PROG_STATE_READFLASH);
-    		len = USB_NO_MSG;
-
-	} else if (data[1] == USBASP_FUNC_READEEPROM) {
-    		setupTransfer(data, PROG_STATE_READEEPROM);
-    		len = USB_NO_MSG;
-
-
-	} else if (data[1] == USBASP_FUNC_WRITEFLASH) {
-        
-            uint16_t low_addr = ((uint16_t)data[3] << 8) | data[2];
-            // Магия: если newmode нет, prog_address_high просто равен 0
-            prog_address = ((uint32_t)prog_address_high << 16) | low_addr;
-    
-            prog_nbytes = ((uint16_t)data[7] << 8) | data[6];
-    
-            if ((prog_address & 0x1FF) == 0) {
-                prog_pagesize = 256; 
-            } else {
-                prog_pagesize = 128; 
-            }
-    
-            prog_pagecounter = prog_pagesize;  
-            prog_state = PROG_STATE_WRITEFLASH;
-            len = USB_NO_MSG;
-
-    	} else if (data[1] == USBASP_FUNC_WRITEEEPROM) {
-            
-            uint16_t low_addr = ((uint16_t)data[3] << 8) | data[2];
-            // Точно такая же магия. Никаких if (!prog_address_newmode)!
-            prog_address = ((uint32_t)prog_address_high << 16) | low_addr;
-            
-            prog_pagesize = 0;
-            prog_nbytes = ((uint16_t)data[7] << 8) | data[6];
-            prog_state = PROG_STATE_WRITEEEPROM;
-            len = USB_NO_MSG;
-
-	} else if (data[1] == USBASP_FUNC_SETLONGADDRESS) {
-    		// Собираем полный 32-битный адрес безопасно (без указателей)
-    		uint32_t addr = ((uint32_t)data[5] << 24) | ((uint32_t)data[4] << 16) | 
-                    ((uint32_t)data[3] << 8)  | (uint32_t)data[2];
-    
-    		// Включаем режим расширенной адресации
-    		prog_address_newmode = 1;
-    
-    		// Запоминаем ТОЛЬКО старшую часть (она нам пригодится в READ/WRITE)
-    		prog_address_high = (uint16_t)(addr >> 16);
-    
-    		// Отправляем команду 0x4D в целевой чип (для Flash)
-    		ispUpdateExtended(addr);
-
-    		replyBuffer[0] = 0;
-	    	len = 1;
-
-	/* Обработчик USB-команды SETISPSCK (уже есть, но проверим) */
-	} else if (data[1] == USBASP_FUNC_SETISPSCK) {
-    		prog_sck = data[2];  // data[2] содержит код скорости (1-16)
-    
-    		if (prog_sck == USBASP_ISP_SCK_AUTO) {  // 0 = AUTO
-	        user_speed_requested = 0;
-		    } else {
-		        user_speed_requested = 1;
-		    }
-    
-		replyBuffer[0] = 0;
-    		len = 1;
-
-	} else if (data[1] == USBASP_FUNC_GETISPSCK) {
-    		replyBuffer[0] = 0;
-    		replyBuffer[1] = prog_sck;           // текущая установленная скорость
-    		replyBuffer[2] = last_success_speed; // предыдущая успешная скорость
-    		replyBuffer[3] = sck_sw_delay;
-    		replyBuffer[4] = isp_hiaddr;
-    		replyBuffer[5] = prog_state;
-    		// ОЧИСТИТЬ остальные!
-        	replyBuffer[6] = 0;
-        	replyBuffer[7] = 0;
-    		len = 6;
-
-//------------------------------------------------------------------------------------------
+//TPI ------------------------------------------------------------------------------------------
 
 	} else if (data[1] == USBASP_FUNC_TPI_CONNECT) {
 		tpi_dly_cnt = data[2] | (data[3] << 8);
@@ -431,16 +441,8 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
 		setupTransfer(data, PROG_STATE_TPI_WRITE);
 		len = USB_NO_MSG; /* multiple out */
 
-//------------------------------------------------------------------------------------------
-	} else if (data[1] == USBASP_FUNC_GETCAPABILITIES) {
-		replyBuffer[0] = USBASP_CAP_0_TPI | USBASP_CAP_0_I2C | USBASP_CAP_0_MW;
-		replyBuffer[1] = USBASP_CAP_1_SCK_AUTO | USBASP_CAP_1_HW_SCK;
-		replyBuffer[2] = 0;
-		replyBuffer[3] = USBASP_CAP_3_FLASH | USBASP_CAP_3_EEPROM |
-                 		 USBASP_CAP_3_FUSES | USBASP_CAP_3_LOCKBITS |
-                 		 USBASP_CAP_3_EXTENDED_ADDR | USBASP_CAP_3MHZ;          // 0x40 – никаких сдвигов    
-    		len = 4;
 	}
+//------------------------------------------------------------------------------------------
 
     usbMsgPtr = replyBuffer;
    return len;
