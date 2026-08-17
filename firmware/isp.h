@@ -36,26 +36,34 @@
 #define CS_LOW()	ISP_OUT &= ~(1 << ISP_RST); /* RST low */
 #define CS_HI()		ISP_OUT |= (1 << ISP_RST); /* RST high */
 
+// Идеальный макрос: объединяет быструю проверку переполнения 16 бит 
+// и вызов функции обновления. Компилятор inline-ит это без накладных расходов.
+#define UPDATE_EXT_ADDR_IF_CROSSED(addr) do { \
+    if ((uint16_t)(addr) == 0) { \
+        ispUpdateExtended(addr); \
+    } \
+} while(0)
+
 extern uchar (*ispTransmit)(uchar);
 
 extern uint16_t prog_pagesize;
-extern uchar prog_address_newmode;
+extern volatile uchar prog_address_newmode;
 extern uchar isp_hiaddr;
 extern uint8_t last_success_speed;
 extern uchar prog_sck;
 extern uint8_t user_speed_requested; 
 extern uint32_t prog_address;
-extern uint16_t prog_address_high; // <--- Добавить это!
+extern uint8_t prog_address_high; // <--- Добавить это!
 
 /* Prepare connection to target device */
-void ispConnect();
+void ispConnect(void);
 
-void ispSPIConnect();
+void ispSPIConnect(void);
 
 /* Close connection to target device */
-void ispDisconnect();
+void ispDisconnect(void);
 
-void ispDelay();
+void ispDelay(void);
 
 /* read an write a byte from isp using software (slow) */
 uchar ispTransmit_sw(uchar send_byte);
@@ -64,7 +72,7 @@ uchar ispTransmit_sw(uchar send_byte);
 uchar ispTransmit_hw(uchar send_byte);
 
 /* enter programming mode */
-uchar ispEnterProgrammingMode();
+uchar ispEnterProgrammingMode(void);
 
 /* read byte from eeprom at given address */
 uchar ispReadEEPROM(unsigned int address);
@@ -85,7 +93,7 @@ void ispSetSCKOption(uchar option);
 
 void spibusy(void);
 
-void ispUpdateExtended(uint32_t address);
+void ispUpdateExtended(uint8_t ext_addr);
 
 #endif /* __isp_h_included__ */
 

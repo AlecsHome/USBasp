@@ -9,7 +9,16 @@
 #include <avr/pgmspace.h>
 #include <stddef.h>
 
-uchar (*ispTransmit)(uchar) = NULL;
+// --- Безопасная заглушка для предотвращения Hard Fault ---
+// Если ISP команды придут до инициализации скорости, 
+// контроллер не зависнет, а вернет 0xFF (имитация пустой SPI шины).
+static uchar dummy_transmit(uchar b) {
+    (void) b; // <--- ДОБАВИТЬ ЭТУ СТРОКУ: говорим компилятору "я знаю, что не использую"
+    return 0xFF;
+}
+
+// Private data / Globals
+uchar (*ispTransmit)(uchar) = dummy_transmit; // <--- ИНИЦИАЛИЗИРУЕМ ЗАГЛУШКОЙ
 uint8_t last_success_speed = USBASP_ISP_SCK_3000;
 
 // Быстрое вычисление расширенного адреса (для чипов > 64KB)
@@ -56,79 +65,63 @@ static const uchar isp_retry_speeds[] PROGMEM = {
 #define ISP_SPEED_CNT (sizeof(isp_retry_speeds)/sizeof(isp_retry_speeds[0]))
 #define GET_SPEED(idx) pgm_read_byte(&isp_retry_speeds[(idx)])
 
-volatile uint8_t sck_sw_delay = 0;
+uint8_t sck_sw_delay = 0;
 uchar isp_hiaddr = 0xFF;
 
-static inline void spiHWdisable() {
-    SPCR = 0;
+static inline void spiHWdisable(void) {
+    SPCR &= ~((1 << SPE) | (1 << MSTR)); // 1. Хирургическое отключение
+    (void)SPSR;  // 2. Сброс флага прерывания
+    (void)SPDR;  // 3. Сброс флага прерывания
 }
 
 void ispSetSCKOption(uchar option) {
     // 1. Обработка AUTO
     if (option == USBASP_ISP_SCK_AUTO) {
-        user_speed_requested = 0;
-        // Берем из кэша или дефолт (3.0 MHz)
         option = (last_success_speed != USBASP_ISP_SCK_AUTO && 
                   last_success_speed != 0) ? last_success_speed : USBASP_ISP_SCK_3000;
-    } else {
-        // Пользователь задал скорость явно
-        user_speed_requested = 1;
     }
     
-    // 2. Защита от мусора
+    // 2. Защита от мусора (отсекаем всё, кроме 1..13)
     if (option < USBASP_ISP_SCK_0_5 || option > USBASP_ISP_SCK_3000) {
         option = USBASP_ISP_SCK_3000;
     }
 
-    // Сохраняем текущую скорость глобально (для запросов avrdude)
     prog_sck = option;
 
-    // 3. Настройка Hardware SPI (93.75 kHz ... 3.0 MHz, опции 8..13)
+    // 3. Аппаратный SPI (опции 8..13)
+        // 3. Аппаратный SPI (опции 8..13)
     if (option >= USBASP_ISP_SCK_93_75) {
-        uint8_t idx = USBASP_ISP_SCK_3000 - option; // 13->0, ..., 8->5
-        
-        if (idx < sizeof(hw_spcr_table)) {
-            // Читаем только биты делителя из SPCR и бит SPI2X из SPSR
-            uint8_t spcr_bits = pgm_read_byte(&hw_spcr_table[idx]);
-            uint8_t spsr_bits = pgm_read_byte(&hw_spsr_table[idx]);
-            
-            // Полная и безопасная инициализация регистров
-            SPCR = SPI_BASE | spcr_bits;
-            SPSR = spsr_bits;
-        } else {
-            // Fallback (теоретически недостижимо)
-            SPCR = SPI_BASE | (1 << SPR0);
-            SPSR = (1 << SPI2X);
-        }
-        
-        // Переключаем на HW SPI
         ispTransmit = (uchar (*)(uchar))ispTransmit_hw;
-        
-        // ОБЯЗАТЕЛЬНО 0, чтобы avrdude не выводил "[SW delay: 1]"
         sck_sw_delay = 0; 
-    } 
-    // 4. Настройка Software SPI (0.5 kHz ... 32 kHz, опции 1..7)
-    else if (option >= USBASP_ISP_SCK_0_5) {
-        // Отключаем аппаратный SPI
-        SPCR &= ~(1 << SPE);
+
+        uint8_t idx = USBASP_ISP_SCK_3000 - option; 
         
-        // Вычисляем индекс задержки: 7->0, 6->1, ..., 1->6
-        uint8_t idx = USBASP_ISP_SCK_32 - option; 
+        // SPCR можно писать напрямую
+        SPCR = SPI_BASE | pgm_read_byte(&hw_spcr_table[idx]);
         
-        if (idx < sizeof(sw_delay_table)) {
-            sck_sw_delay = pgm_read_byte(&sw_delay_table[idx]);
-        } else {
-            sck_sw_delay = 48; // Fallback
-        }
+        // ИСПРАВЛЕНО: Элегантный Read-Modify-Write в одну строку.
+        // ~(1 << SPI2X) создает маску 0xFE (11111110).
+        // SPSR & 0xFE сбрасывает бит SPI2X, сохраняя SPIF и WCOL нетронутыми.
+        // | spsr_mask записывает новое значение SPI2X из таблицы.
+        uint8_t spsr_mask = pgm_read_byte(&hw_spsr_table[idx]);
+        SPSR = (SPSR & ~(1 << SPI2X)) | spsr_mask;
         
-        // Переключаем на SW SPI
+        // Сброс флага SPIF
+        (void)SPSR;
+        (void)SPDR;
+    }  
+    // 4. Программный SPI (опции 1..7)
+    else {
         ispTransmit = ispTransmit_sw;
+        SPCR = 0; // Полностью отключаем HW SPI
+        
+        uint8_t idx = USBASP_ISP_SCK_32 - option; // Всегда 0..6
+        sck_sw_delay = pgm_read_byte(&sw_delay_table[idx]);
     }
-    
 }
 
 // --- Задержка ---
-void ispDelay() {
+void ispDelay(void) {
     
     uint8_t starttime = TIMERVALUE;
     while ((uint8_t)(TIMERVALUE - starttime) < sck_sw_delay) {
@@ -169,8 +162,8 @@ void ispDisconnect(void) {
     spiHWdisable();
     // --- СБРОС СОСТОЯНИЯ СЕССИИ ---
     prog_sck = USBASP_ISP_SCK_AUTO;
-//    prog_address_newmode = 0;   // <--- СБРОС
-//    prog_address_high = 0;      // <--- СБРОС
+    prog_address_newmode = 0;   // <--- СБРОС
+    prog_address_high = 0;      // <--- СБРОС
     isp_hiaddr = 0xFF;          // <--- Тоже неплохо сбросить кэш расширенного адреса ISP
 }
 
@@ -205,104 +198,110 @@ uchar ispTransmit_hw(uchar send_byte) {
 
 static uchar tryEnterProgMode(uchar speed_code) {
     ispSetSCKOption(speed_code);
+    
     uint8_t pulse = (speed_code <= USBASP_ISP_SCK_32) ? 15 : 1;
-    uint8_t delay = (speed_code <= USBASP_ISP_SCK_32) ? 250 : 63;
-  
+    // Уменьшаем задержку с 63 (20 мс) до 20 (6.4 мс). 
+    // Этого более чем достаточно по даташиту, и это сильно ускорит перебор скоростей!
+    uint8_t delay = 250; 
+    
     for (uchar tries = 3; tries > 0; tries--) {
         ISP_OUT |= (1 << ISP_RST);
         clockWait(pulse);
         ISP_OUT &= ~(1 << ISP_RST);
         clockWait(delay);
-
+        
         ispTransmit(0xAC);
         ispTransmit(0x53);
-        uchar check  = ispTransmit(0);
-        uchar check2 = ispTransmit(0);
-
-        if (check == 0x53 && check2 == 0x00) {
-            return 0;
+        uint8_t check = ispTransmit(0x00);
+        ispTransmit(0x00); // <-- ВАЖНО: Четвертый байт отправляем, но НЕ ПРОВЕРЯЕМ!
+        
+        // По спецификации AVR ISP проверяем ТОЛЬКО третий байт (должен быть 0x53)
+        if (check == 0x53) {
+            return 0; // Успех
         }
+        
         clockWait(3);
     }
     return 1;
 }
 
 uint8_t ispEnterProgrammingMode(void) {
-    uint8_t start_idx = 0;
-    // Используем skip_speed ТОЛЬКО для кэша (AUTO режима)
-    uint8_t skip_speed = USBASP_ISP_SCK_AUTO; 
+  uint8_t start_idx = 0;
+  // Используем skip_speed ТОЛЬКО для кэша (AUTO режима)
+  uint8_t skip_speed = USBASP_ISP_SCK_AUTO; 
 
-    // 1. Если пользователь задал скорость принудительно
-    if (user_speed_requested) {
-        user_speed_requested = 0; // Сбрасываем флаг сразу
-        
-        if (tryEnterProgMode(prog_sck) == 0) {
-            last_success_speed = prog_sck;
-            return 0; // Успех
-        }
-        
-        // Скорость не подошла. Ищем следующую (более медленную) в таблице.
-        for (uint8_t i = 0; i < ISP_SPEED_CNT; i++) {
-            if (GET_SPEED(i) == prog_sck) {
-                start_idx = i + 1; // Начинаем перебор со следующей
-                break;
-            }
-        }
-        
-        // ЗАЩИТА: Если была запрошена самая медленная скорость,
-        // start_idx выйдет за границы. Сбрасываем в начало (на самую быструю).
-        if (start_idx >= ISP_SPEED_CNT) {
-            start_idx = 0; 
-        }
-        // ПРИМЕЧАНИЕ: Нам не нужен skip_speed здесь. Цикл начнется с start_idx 
-        // и естественным образом никогда не дойдет до проваленной пользовательской скорости.
-    }
-    else {
-        // 2. Режим AUTO: пробуем последнюю удачную скорость (кэш)
-        if (last_success_speed != USBASP_ISP_SCK_AUTO) {
-            if (tryEnterProgMode(last_success_speed) == 0) {
-                return 0; // Успех
-            }
-            
-            // Кэш не сработал. Запоминаем его, чтобы цикл перебора не тратил на него время.
-            skip_speed = last_success_speed;
-            // Сбрасываем кэш
-            last_success_speed = USBASP_ISP_SCK_AUTO;
-        }
-        // В режиме AUTO start_idx остается 0 (начинаем с самой быстрой)
+  // 1. Если пользователь задал скорость принудительно
+  if (user_speed_requested) {
+    user_speed_requested = 0; // Сбрасываем флаг сразу
+    
+    if (tryEnterProgMode(prog_sck) == 0) {
+      last_success_speed = prog_sck;
+      return 0; // Успех
     }
     
-    // 3. Полный перебор скоростей (Brute-force)
-    for (uint8_t i = start_idx; i < ISP_SPEED_CNT; i++) {
-        uint8_t speed = GET_SPEED(i);
-        
-        // Пропускаем ТОЛЬКО ту скорость, которая не сработала из кэша
-        if (speed == skip_speed) {
-            continue;
-        }
-        
-        if (tryEnterProgMode(speed) == 0) {
-            // Нашли рабочую скорость, сохраняем в кэш
-            last_success_speed = speed;
-            return 0;
-        }
+    // --- O(1) ВЫЧИСЛЕНИЕ ИНДЕКСА ---
+    // Таблица isp_retry_speeds убывающая: 13, 12, 11, 10...
+    // Формула индекса: Индекс = Максимальный_ID (13) - Запрошенный_ID
+    if (prog_sck >= USBASP_ISP_SCK_3000) {
+      // Защита от мусора: если пришла цифра больше 13 (например 255), 
+      // вычитание уйдет в минус. Начинаем с самой быстрой.
+      start_idx = 0; 
+    } else {
+      start_idx = USBASP_ISP_SCK_3000 - prog_sck;
+      
+      // Защита от выхода за пределы массива (если скорость < 500 Гц, 
+      // чего нет в таблице, индекс будет >= 13)
+      if (start_idx >= ISP_SPEED_CNT) {
+        start_idx = 0; 
+      }
+    }
+    // Примечание: Здесь НЕ нужен skip_speed. Цикл начнется со start_idx, 
+    // который уже указывает на скорость СЛЕДУЮЩУЮ за проваленной.
+  }
+  else {
+    // 2. Режим AUTO: пробуем последнюю удачную скорость (из кэша)
+    // Проверка != 0 защищает от ситуации, если кэш испорчен
+    if (last_success_speed != USBASP_ISP_SCK_AUTO && last_success_speed != 0) {
+      if (tryEnterProgMode(last_success_speed) == 0) {
+        return 0; // Успех
+      }
+      
+      // Кэш не сработал. Запоминаем его, чтобы цикл перебора не тратил на него время.
+      skip_speed = last_success_speed;
+      // Сбрасываем кэш
+      last_success_speed = USBASP_ISP_SCK_AUTO;
+    }
+    // В режиме AUTO start_idx остается 0 (начинаем с самой быстрой - 3 МГц)
+  }
+  
+  // 3. Полный перебор скоростей (Brute-force)
+  for (uint8_t i = start_idx; i < ISP_SPEED_CNT; i++) {
+    uint8_t speed = GET_SPEED(i);
+    
+    // Пропускаем ТОЛЬКО ту скорость, которая не сработала из кэша
+    if (speed == skip_speed) {
+      continue;
     }
     
-    // Ничего не помогло
-    return 1;
+    if (tryEnterProgMode(speed) == 0) {
+      // Нашли рабочую скорость, сохраняем в кэш
+      last_success_speed = speed;
+      return 0;
+    }
+  }
+  
+  // Ничего не помогло
+  return 1;
 }
 
-void ispUpdateExtended(uint32_t address) {
-    
+void ispUpdateExtended(uint8_t ext_addr) {
     if (!prog_address_newmode) return; 
-    
-    uint8_t ext = GET_EXT_ADDR(address);  
-    
-    if (ext != isp_hiaddr) {
-        isp_hiaddr = ext;
+
+    if (ext_addr != isp_hiaddr) {
+        isp_hiaddr = ext_addr;
         ispTransmit(0x4D);
         ispTransmit(0x00);
-        ispTransmit(ext);
+        ispTransmit(ext_addr);
         ispTransmit(0x00);
     }
 }
@@ -316,27 +315,79 @@ uchar ispReadFlash(uint32_t address) {
 }
 
 // ИСПРАВЛЕНО: Фиксированная задержка вместо глючного опроса (как в оригинале)
-uchar ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode) {
-    
+uchar ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode)
+{
     ispTransmit(0x40 | ((address & 1) << 3));
     ispTransmit((uint8_t)(address >> 9));
     ispTransmit((uint8_t)(address >> 1));
     ispTransmit(data);
 
     if (!pollmode) return 0;
-    // Фиксированная задержка 0.64 мс для одиночной записи (если нет страничного режима)
-    clockWait(2);
+
+    // УМНЫЙ ОПРОС (Smart Polling)
+    if (data != 0xFF) {
+        // Если пишем не 0xFF, можно безопасно опрашивать чип.
+        for (uint8_t t = 0; t < 15; t++) {
+            if (ispReadFlash(address) == data) return 0; // Чип готов!
+            clockWait(1); // Ждем 0.32 мс перед следующей попыткой
+        }
+    }
+    
+    // Если data == 0xFF (нельзя опрашивать) или если истек таймаут опроса:
+    // Используем безопасную фиксированную задержку 4.8 мс.
+    clockWait(15);
     return 0;
 }
 
-// ИСПРАВЛЕНО: Фиксированная задержка страницы. Убирает баг с 0xFF и ускоряет запись!
-uchar ispFlushPage(uint32_t address) { // <--- ВОТ ГЛАВНОЕ: 32-битный аргумент!
-    
+// ИСПРАВЛЕНО: Добавлена передача 17-го бита адреса для ATmega2560
+uchar ispFlushPage(uint32_t address) {
     ispTransmit(0x4C);
-    ispTransmit((uint8_t)(address >> 9)); 
+    
+    // Если чип большой (страница >= 256), извлекаем 17-й бит (E) быстрым макросом.
+    // Если чип маленький, E всегда равен 0 (экономия тактов на ATmega8/328).
+    uint8_t ext_bit = (prog_pagesize >= 256) ? GET_EXT_ADDR(address) : 0;
+    
+    // Достаем биты 9..15 байтового адреса напрямую из памяти (без 32-битных сдвигов).
+    uint8_t high_byte = (((uint8_t*)&(address))[1]) >> 1;
+    
+    // Склеиваем E в 7-й бит, HHHHHHH в младшие 7 бит.
+    // Для ATmega8/328p это всегда 0 | high_byte, код на 100% обратно совместим!
+    ispTransmit((ext_bit << 7) | high_byte); 
+    
     ispTransmit((uint8_t)(address >> 1));
     ispTransmit(0);
+    
+    // Точная задержка по размеру страницы (3.52 мс для мелких, 4.8 мс для больших)
+    clockWait((prog_pagesize >= 256) ? 16 : 12);
+    return 0;
+}
 
+uchar ispReadEEPROM(unsigned int address) {
+    
+    ispTransmit(0xA0);
+    ispTransmit((uint8_t)(address >> 8));
+    ispTransmit((uint8_t)(address));
+    return ispTransmit(0);
+}
+
+uchar ispWriteEEPROM(unsigned int address, uchar data) {
+    ispTransmit(0xC0);
+    ispTransmit((uint8_t)(address >> 8));
+    ispTransmit((uint8_t)address); // & 0xFF не нужен, каст усечет сам
+    ispTransmit(data);
+
+    // Поллинг готовности EEPROM с задержкой внутри цикла
+    for (uint8_t t = 15; t; --t) {
+        clockWait(1); // Даем EEPROM время на запись перед каждой попыткой чтения
+        if (ispReadEEPROM(address) == data) {
+            return 0; // Запись успешна
+        }
+    }
+
+    return 1; // Таймаут: EEPROM не ответила за 6.3 мс (возможно, чип мертв)
+}
+
+/*
     // 15 тиков по 320 мкс = 4.8 мс.
     // Это максимальное время записи страницы (Page Write) для AVR.
     // Чип гарантированно успеет закончить запись.
@@ -345,15 +396,13 @@ uchar ispFlushPage(uint32_t address) { // <--- ВОТ ГЛАВНОЕ: 32-бит�
     // Для ATmega8/16/32: tWD_FLASH = 3.0 ms
     // Динамическое ожидание в зависимости от типа чипа
     // Каждый тик = 320 мкс (при 12 МГц)
-    // ATmega8:    10 тиков = 3.2 мс (минимальное время)
-    // ATmega48:   10 тиков = 3.2 мс
-    // ATmega88:   10 тиков = 3.2 мс
-    // ATmega168:  10 тиков = 3.2 мс
-    // ATmega328:  10 тиков = 3.2 мс
-    // ATmega128:  15 тиков = ~4.8 мс
-    // ATmega2560: 15 тиков = ~4.8 мс
-    // ATmega4809: 18 тиков = ~5.8 мс
-    
+    // ATmega8:  10 тиков = 3.2 мс (минимальное время)
+    // ATmega48: 10 тиков = 3.2 мс
+    // ATmega88: 10 тиков = 3.2 мс
+    // ATmega168: 10 тиков = 3.2 мс
+    // ATmega328: 10 тиков = 3.2 мс
+    // ATmega128: 15 тиков = 4.8 мс
+    // ATmega2560: 15 тиков = 4.8 мс
     // 14 * 320 мкс = 4.48 мс
     // ATmega2560: tWD_FLASH = 4.5 ms @ 5V (максимум по даташиту)
     // ATmega8/328P: tWD_FLASH = 3.0-4.5 ms @ 5V
@@ -363,31 +412,6 @@ uchar ispFlushPage(uint32_t address) { // <--- ВОТ ГЛАВНОЕ: 32-бит�
     // ATmega2560/128: page_size = 256 → длинная задержка
     // ATmega8/328P:   page_size = 64/128 → короткая задержка
     // Элегантная эвристика в одну строку
-    clockWait((prog_pagesize >= 256) ? 15 : 10);
-    return 0;
-}
-
-uchar ispReadEEPROM(unsigned int address) {
-    
-    ispTransmit(0xA0);
-    ispTransmit(address >> 8);
-    ispTransmit(address & 0xFF);
-    return ispTransmit(0);
-}
-
-uchar ispWriteEEPROM(unsigned int address, uchar data) {
-    
-    ispTransmit(0xC0);
-    ispTransmit(address >> 8);
-    ispTransmit(address & 0xFF);
-    ispTransmit(data);
-
-    if (ispReadEEPROM(address) == data) return 0; 
-
-    for (uint8_t t = 6; t; --t) {
-        clockWait(t > 4 ? 1 : t > 2 ? 2 : 4);
-        if (ispReadEEPROM(address) == data) return 0; 
-    }
-      return 1;
-}
+    clockWait((prog_pagesize >= 256) ? 15 : 10);                
+*/
 
