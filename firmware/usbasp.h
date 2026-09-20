@@ -21,7 +21,7 @@
 #define USBASP_FUNC_WRITEFLASH  	6
 #define USBASP_FUNC_READEEPROM  	7
 #define USBASP_FUNC_WRITEEEPROM 	8
-#define USBASP_FUNC_SETLONGADDRESS      9
+#define USBASP_FUNC_SETLONGADDRESS	9
 #define USBASP_FUNC_SETISPSCK 		10
 
 #define USBASP_FUNC_TPI_CONNECT      	11
@@ -44,13 +44,12 @@
 #define USBASP_FUNC_I2C_STOP            74
 #define USBASP_FUNC_I2C_READ_BYTE       75
 #define USBASP_FUNC_I2C_WRITE_BYTE      76
-#define USBASP_FUNC_I2C_SETDEVICE       77  // <--- ”брали дублирующийс€ 0x58!
+//#define USBASP_FUNC_I2C_SETDEVICE       77  // <--- ”брали дублирующийс€ 0x58!
 
-#define USBASP_FUNC_MW_TRANSMIT 	90
 #define USBASP_FUNC_MW_READ		92
 #define USBASP_FUNC_MW_WRITE		93
 #define USBASP_FUNC_MW_BUSY		94
-#define USBASP_FUNC_MW_GETADRLEN 	95
+//#define USBASP_FUNC_MW_GETADRLEN 	95
 
 #define USBASP_FUNC_GETCAPABILITIES     127
 
@@ -91,35 +90,35 @@
 #define PROG_STATE_MW_WRITE		58
 
 // Block mode data size
-#define USBASP_READBLOCKSIZE   0xFF
-#define USBASP_WRITEBLOCKSIZE  0xFF
+#define USBASP_READBLOCKSIZE   		128
+#define USBASP_WRITEBLOCKSIZE  		128
 
 // ISP SCK speed identifiers
-#define USBASP_ISP_SCK_AUTO   	0
-#define USBASP_ISP_SCK_0_5    	1   /* 500 Hz */
-#define USBASP_ISP_SCK_1      	2   /*   1 kHz */
-#define USBASP_ISP_SCK_2      	3   /*   2 kHz */
-#define USBASP_ISP_SCK_4      	4   /*   4 kHz */
-#define USBASP_ISP_SCK_8      	5   /*   8 kHz */
-#define USBASP_ISP_SCK_16     	6   /*  16 kHz */
-#define USBASP_ISP_SCK_32     	7   /*  32 kHz */
-#define USBASP_ISP_SCK_93_75  	8   /*  93.75 kHz */
-#define USBASP_ISP_SCK_187_5  	9   /* 187.5  kHz */
-#define USBASP_ISP_SCK_375    	10  /* 375 kHz   */
-#define USBASP_ISP_SCK_750    	11  /* 750 kHz   */
-#define USBASP_ISP_SCK_1500   	12  /* 1.5 MHz   */
-#define USBASP_ISP_SCK_3000   	13  /* 3 MHz   */
+#define USBASP_ISP_SCK_AUTO   		0
+#define USBASP_ISP_SCK_0_5    		1   /* 500 Hz */
+#define USBASP_ISP_SCK_1      		2   /*   1 kHz */
+#define USBASP_ISP_SCK_2      		3   /*   2 kHz */
+#define USBASP_ISP_SCK_4      		4   /*   4 kHz */
+#define USBASP_ISP_SCK_8      		5   /*   8 kHz */
+#define USBASP_ISP_SCK_16     		6   /*  16 kHz */
+#define USBASP_ISP_SCK_32     		7   /*  32 kHz */
+#define USBASP_ISP_SCK_93_75  		8   /*  93.75 kHz */
+#define USBASP_ISP_SCK_187_5  		9   /* 187.5  kHz */
+#define USBASP_ISP_SCK_375    		10  /* 375 kHz   */
+#define USBASP_ISP_SCK_750    		11  /* 750 kHz   */
+#define USBASP_ISP_SCK_1500   		12  /* 1.5 MHz   */
+#define USBASP_ISP_SCK_3000   		13  /* 3 MHz   */
 
 /* macros for gpio functions */
-#define ledRedOff()    PORTC |=  (1 << PC0)   // анод через резистор к +5V
-#define ledRedOn()     PORTC &= ~(1 << PC0)   // катод к GND > светодиод горит
+#define ledRedOff()    			PORTC |=  (1 << PC0)   // анод через резистор к +5V
+#define ledRedOn()     			PORTC &= ~(1 << PC0)   // катод к GND > светодиод горит
 
-#define ledGreenOff()  PORTC |=  (1 << PC1)
-#define ledGreenOn()   PORTC &= ~(1 << PC1)
+#define ledGreenOff()  			PORTC |=  (1 << PC1)
+#define ledGreenOn()   			PORTC &= ~(1 << PC1)
 
-#define SLOW_SCK_PORT PORTC
-#define SLOW_SCK_PIN  PINC
-#define SLOW_SCK_NUM  PC2
+#define SLOW_SCK_PORT 			PORTC
+#define SLOW_SCK_PIN  			PINC
+#define SLOW_SCK_NUM  			PC2
 
 #define USB_CFG_BUFFER_SIZE     	64    /* –азмер буфера USB */
 

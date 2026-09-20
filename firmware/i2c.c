@@ -1,6 +1,5 @@
 #include <avr/io.h>
 #include "clock.h"
-#include <util/delay.h>
 #include "i2c.h"
 #include "isp.h"
 
@@ -31,8 +30,26 @@
 
 // Прямые макросы задержек. Компилятор видит константу и генерит точные NOP циклы
 // Не оборачиваем _delay_us в функции!
-#define I2C_DELAY_FAST  _delay_us(2);  // Для 400 кГц (Fast Mode)
-#define I2C_DELAY_NORM  _delay_us(4);  // Для 100 кГц (Standard Mode)
+// Универсальный макрос микрозадержки без util/delay.h
+// Вычисляется на этапе компиляции. (F_CPU / 1000000) дает количество тактов на 1 мкс.
+#define I2C_DELAY_US(us) __builtin_avr_delay_cycles((F_CPU / 1000000UL) * (us))
+
+// Для 100 кГц (Standard Mode)
+#define I2C_DELAY_NORM   I2C_DELAY_US(4)
+
+// Для 400 кГц (Fast Mode)
+#define I2C_DELAY_FAST   I2C_DELAY_US(2)
+
+/*
+// Компактные макросы задержек на чистом ассемблере (для 12 МГц)
+// Цикл dec/brne занимает 3 такта. 1 такт = 83.3 наносекунды.
+
+// 4 мкс = 48 тактов. 16 итераций * 3 такта = 48 тактов.
+#define I2C_DELAY_NORM __asm__ __volatile__ ( "ldi r24, 16 \n 1: dec r24 \n brne 1b" ::: "r24" )
+
+// 2 мкс = 24 такта. 8 итераций * 3 такта = 24 такта.
+#define I2C_DELAY_FAST __asm__ __volatile__ ( "ldi r24, 8 \n 1: dec r24 \n brne 1b" ::: "r24" )
+*/
 
 void i2c_init() {
     I2C_SDA_HIGH();
@@ -42,40 +59,40 @@ void i2c_init() {
 void i2c_start() {
     I2C_SDA_HIGH();
     I2C_SCL_HIGH();
-    I2C_DELAY_NORM
+    I2C_DELAY_NORM;
     I2C_SDA_LOW();
-    I2C_DELAY_NORM
+    I2C_DELAY_NORM;
     I2C_SCL_LOW();
-    I2C_DELAY_NORM
+    I2C_DELAY_NORM;
 }
 
 void i2c_start_rep() {
     I2C_SCL_LOW();
-    I2C_DELAY_FAST
+    I2C_DELAY_FAST;
     I2C_SDA_HIGH();
-    I2C_DELAY_FAST
+    I2C_DELAY_FAST;
     I2C_SCL_HIGH();
-    I2C_DELAY_FAST
+    I2C_DELAY_FAST;
     I2C_SDA_LOW();
-    I2C_DELAY_FAST
+    I2C_DELAY_FAST;
     I2C_SCL_LOW();
-    I2C_DELAY_FAST
+    I2C_DELAY_FAST;
 }
 
 void i2c_stop() {
     I2C_SCL_LOW();
     I2C_SDA_LOW();
-    I2C_DELAY_FAST
+    I2C_DELAY_FAST;
     I2C_SCL_HIGH();
-    I2C_DELAY_FAST
+    I2C_DELAY_FAST;
     I2C_SDA_HIGH();
-    I2C_DELAY_NORM
+    I2C_DELAY_NORM;
 }
 
 unsigned char i2c_send_byte(unsigned char byte) {
     for (unsigned char i = 0; i < 8; i++) {
         I2C_SCL_LOW();
-        I2C_DELAY_FAST
+        I2C_DELAY_FAST;
         
         // Ветвление заменено на более понятное компилятору
         if (byte & 0x80) {
@@ -84,18 +101,18 @@ unsigned char i2c_send_byte(unsigned char byte) {
             I2C_SDA_LOW();
         }
         
-        I2C_DELAY_FAST
+        I2C_DELAY_FAST;
         I2C_SCL_HIGH();
-        I2C_DELAY_NORM
+        I2C_DELAY_NORM;
         byte <<= 1;
     }
     
     // Чтение ACK
     I2C_SCL_LOW();
     I2C_SDA_HIGH(); // Отпускаем SDA, чтобы ведомый мог ответить
-    I2C_DELAY_FAST
+    I2C_DELAY_FAST;
     I2C_SCL_HIGH();
-    I2C_DELAY_NORM
+    I2C_DELAY_NORM;
     
     unsigned char ack = !I2C_SDA_VALUE; // 0 - NACK, 1 - ACK
     
@@ -109,9 +126,9 @@ uint8_t i2c_read_byte(uint8_t ack) {
     
     for (uint8_t i = 0; i < 8; i++) {
         I2C_SCL_LOW();
-        I2C_DELAY_NORM
+        I2C_DELAY_NORM;
         I2C_SCL_HIGH();
-        I2C_DELAY_NORM
+        I2C_DELAY_NORM;
         
         result <<= 1;
         // Чтение бита напрямую в результат (компактнее)
@@ -127,9 +144,9 @@ uint8_t i2c_read_byte(uint8_t ack) {
     } else {
         I2C_SDA_HIGH(); // NACK = отпустить
     }
-    I2C_DELAY_FAST
+    I2C_DELAY_FAST;
     I2C_SCL_HIGH();
-    I2C_DELAY_FAST
+    I2C_DELAY_FAST;
     I2C_SCL_LOW();
     I2C_SDA_HIGH(); // Обязательно отпускаем SDA после ACK
     

@@ -8,15 +8,13 @@
  * Last change....: 2005-04-20
  */
 
-#include <inttypes.h>
-#include <avr/io.h>
 #include "clock.h"
 
 /* wait time * 320 us */
 void clockWait(uint8_t time) {
-
-    do {
-		uint8_t starttime = TIMERVALUE;
-		while ((uint8_t) (TIMERVALUE - starttime) < CLOCK_T_320us); 
-	} while (--time);
+    // Безопасная реализация: не страдает от переполнения 8 бит
+    while (time--) {
+        uint8_t start = TIMERVALUE;
+        while ((uint8_t)(TIMERVALUE - start) < CLOCK_T_320us);
+    }
 }

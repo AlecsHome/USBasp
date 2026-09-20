@@ -5,12 +5,10 @@ void mwStart(void);
 
 void mwSendData(uint16_t data, uint8_t bits);
 
-unsigned char mwReadByte();
+uint8_t mwReadByte();
 
 void mwEnd();
 
-uchar mwBusy();
-
-unsigned char mwGetAdrLen();
+uint8_t mwBusy();
 
 void mwReadDummyBit(void);

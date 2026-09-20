@@ -44,16 +44,17 @@
     } \
 } while(0)
 
-extern uchar (*ispTransmit)(uchar);
+extern uint8_t (*ispTransmit)(uint8_t);
 
+//extern uint16_t prog_pagesize;
+extern uint8_t  prog_state;
+extern uint16_t prog_pagecounter;
+extern uint16_t prog_nbytes;
+extern uint8_t  prog_sck;
+extern uint8_t  user_speed_requested;
+extern volatile uint8_t prog_address_newmode;
+extern uint8_t  prog_address_high;
 extern uint16_t prog_pagesize;
-extern volatile uchar prog_address_newmode;
-extern uchar isp_hiaddr;
-extern uint8_t last_success_speed;
-extern uchar prog_sck;
-extern uint8_t user_speed_requested; 
-extern uint32_t prog_address;
-extern uint8_t prog_address_high; // <--- Добавить это!
 
 /* Prepare connection to target device */
 void ispConnect(void);
@@ -66,30 +67,30 @@ void ispDisconnect(void);
 void ispDelay(void);
 
 /* read an write a byte from isp using software (slow) */
-uchar ispTransmit_sw(uchar send_byte);
+uint8_t ispTransmit_sw(uint8_t send_byte);
 
 /* read an write a byte from isp using hardware (fast) */
-uchar ispTransmit_hw(uchar send_byte);
+uint8_t ispTransmit_hw(uint8_t send_byte);
 
 /* enter programming mode */
-uchar ispEnterProgrammingMode(void);
-
-/* read byte from eeprom at given address */
-uchar ispReadEEPROM(unsigned int address);
+uint8_t ispEnterProgrammingMode(void);
 
 /* write byte to flash at given address */
-uchar ispWriteFlash(uint32_t address, uchar data, uchar pollmode);
+uint8_t ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode);
 
-uchar ispFlushPage(uint32_t address);
+uint8_t ispFlushPage(uint32_t address);
 
 /* read byte from flash at given address */
-uchar ispReadFlash(uint32_t address);
+uint8_t ispReadFlash(uint32_t address);
+
+/* read byte from eeprom at given address */
+uint8_t ispReadEEPROM(uint16_t address);
 
 /* write byte to eeprom at given address */
-uchar ispWriteEEPROM(unsigned int address, uchar data);
+uint8_t ispWriteEEPROM(uint16_t address, uint8_t data);
 
 /* set SCK speed. call before ispConnect! */
-void ispSetSCKOption(uchar option);
+void ispSetSCKOption(uint8_t option);
 
 void spibusy(void);
 

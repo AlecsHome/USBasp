@@ -67,16 +67,17 @@ CFLAGS  = -Wall -Wextra -Os -std=gnu99 -Iusbdrv -I. -mmcu=$(TARGET)
 CFLAGS += -flto -ffunction-sections -fdata-sections
 CFLAGS += -fno-jump-tables 
 CFLAGS += -fmerge-all-constants
-
+# Убирает дублирующиеся функции из инстанцирований шаблонов
+CFLAGS += -fipa-icf -fipa-icf-functions -fipa-icf-variables
 # Не разделяет wide-типы (uint32_t остаётся в регистрах парах, меньше mov)
-CFLAGS += -fno-split-wide-types 
+CFLAGS += -fno-split-wide-types
 
 # Опции линковщика
 LDFLAGS = -Wl,--gc-sections -Wl,--relax -flto
 
 COMPILE = avr-gcc $(CFLAGS)
 
-OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o isp.o clock.o tpi.o main.o i2c.o microwire.o #spi25.o usbdrv/oddebug.o
+OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o usbdrv/oddebug.o isp.o clock.o tpi.o main.o i2c.o microwire.o 
 
 .c.o:
 	$(COMPILE) -c $< -o $@

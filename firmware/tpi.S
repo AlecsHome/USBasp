@@ -1,16 +1,12 @@
 /**
- * Size-optimized TPI driver
- * Works without external #ifdef blocks
- * PB5 � TPI CLK  (output)
- * PB3 � TPI DATA (open-drain, pull-up)
- *
- * Assembles with: avr-as -mmcu=atmega8 tpi.S -o tpi.o
+ * TPI driver for USBasp (ATmega8 / ATmega328P)
+ * LSB-first, XOR parity, open-drain via DDR toggle
  */
 
 #include <avr/io.h>
 #include "tpi_defs.h"
 
-/* ---------- I/O mapping (hard-wired) ---------- */
+/* ---------- I/O mapping ---------- */
 #define TPI_CLK_PORT  PORTB
 #define TPI_CLK_DDR   DDRB
 #define TPI_CLK_PIN   5
@@ -20,35 +16,32 @@
 #define TPI_DATA_PIN  3
 #define TPI_DATA_IN   PINB
 
-/* ---------- RAM variable ---------- */
-.comm tpi_dly_cnt, 2           ; uint16_t tpi_dly_cnt
+/* RAM variables */
+.comm tpi_dly_cnt, 2
+.global tpi_dly_cnt
 
+.comm tpi_parity_err, 1
+.global tpi_parity_err
 
 /* =========================================================
  *              PUBLIC  API
  * =======================================================*/
-
 .global tpi_init
 .global tpi_send_byte
 .global tpi_recv_byte
-.global tpi_read_block
-.global tpi_write_block
 .global tpi_pr_update
 
 
 /* ---------------------------------------------------------
- *  tpi_init  --  32 dummy clocks + configure pins
+ *  tpi_init — configure pins + 32 idle clocks
  * -------------------------------------------------------*/
 tpi_init:
-    /* CLK output, low */
     cbi _SFR_IO_ADDR(TPI_CLK_PORT), TPI_CLK_PIN
     sbi _SFR_IO_ADDR(TPI_CLK_DDR),  TPI_CLK_PIN
 
-    /* DATA = pull-up (open-drain) */
-    cbi _SFR_IO_ADDR(TPI_DATA_DDR), TPI_DATA_PIN
-    sbi _SFR_IO_ADDR(TPI_DATA_PORT),TPI_DATA_PIN
+    sbi _SFR_IO_ADDR(TPI_DATA_PORT), TPI_DATA_PIN
+    cbi _SFR_IO_ADDR(TPI_DATA_DDR),  TPI_DATA_PIN
 
-    /* 32 dummy bits */
     ldi r21, 32
 1:  rcall tpi_bit_h
     dec r21
@@ -57,185 +50,160 @@ tpi_init:
 
 
 /* ---------------------------------------------------------
- *  tpi_send_byte  --  start + 8 data + parity + 2 stop
+ *  tpi_send_byte — LSB-first, parity, 2 stop bits
  *  in:  r24 = data
  * -------------------------------------------------------*/
 tpi_send_byte:
-    rcall tpi_bit_l          ; start bit
+    rcall tpi_bit_l          ; start bit (T=0)
     ldi r18, 8               ; bit counter
-    clr r19                  ; parity = 0
+    clr r19                  ; parity accumulator
+
 1:
-    eor r19, r24             ; parity ^= data
-    bst r24, 0               ; T = data[0]
-    lsr r24                  ; data >>= 1
-    rcall tpi_bit            ; send T
+    bst r24, 0               ; T = data[0] (LSB first)
+    brtc 2f
+    inc r19                  ; If T=1, increment parity counter
+2:
+    rcall tpi_bit_tx         ; send T
+    lsr r24                  ; shift data (r24 БЕЗОПАСЕН!)
     dec r18
     brne 1b
 
-    bst r19, 0               ; parity bit
-    rcall tpi_bit
+    bst r19, 0               ; T = parity bit (LSB of r19)
+    rcall tpi_bit_tx         ; send parity bit
     rcall tpi_bit_h          ; stop 1
     rcall tpi_bit_h          ; stop 2
     ret
 
 
 /* ---------------------------------------------------------
- *  tpi_recv_byte  --  wait start, 8 data, parity, 2 stop
- *  out: r24 = data (0 if timeout/break)
+ *  tpi_recv_byte — LSB-first, parity check
+ *  out: r24 = data (0 if timeout/error)
+ *  sets tpi_parity_err = 1 on parity error or timeout
  * -------------------------------------------------------*/
 tpi_recv_byte:
-    ldi r18, 192             ; timeout ~1.5 byte
-1:  rcall tpi_bit_h
-    brtc 2f                  ; start detected
+    clr r19
+    sts tpi_parity_err, r19
+
+    ldi r18, 192             ; timeout
+wait_start:
+    rcall tpi_bit_h
+    brtc rx_data
     dec r18
-    brne 1b
-    /* timeout � send break */
-    ldi r24, 0
+    brne wait_start
+
+    ; === TIMEOUT ===
+    ldi r24, 0x00            ; Возвращаем 0 (чтобы не завис while в C)
+    ldi r18, 1
+    sts tpi_parity_err, r18  ; Ставим флаг ошибки
+    
+    ; Break sequence при таймауте
     ldi r18, 26
 3:  rcall tpi_bit_l
     dec r18
     brne 3b
     rcall tpi_bit_h
-    ret
+    rjmp recv_exit
 
-2:  /* receive 8 data + parity */
+rx_data:
     ldi r18, 8
-    clr r19                  ; parity = 0
-    clr r24                  ; data = 0
-4:  rcall tpi_bit_h
-    lsr r24
-    bld r24, 7               ; data |= (T<<7)
-    eor r19, r24             ; parity ^= data
-    dec r18
-    brne 4b
+    clr r19                  ; calculated parity
+    clr r24                  ; received data
 
-    rcall tpi_bit_h          ; parity bit
-    bld r18, 7
-    eor r19, r18
-    brmi 3b                  ; parity error -> break
+recv_loop:
+    rcall tpi_bit_h          ; sample bit → T (LSB first)
+    lsr r24
+    bld r24, 7               ; data[7] = T
+    brtc 2f
+    inc r19                  ; If T=1, increment parity counter
+2:
+    dec r18
+    brne recv_loop
+
+    rcall tpi_bit_h          ; Читаем бит четности в T
+    bld r18, 0               ; r18[0] = принятый бит четности
+    eor r19, r18             ; r19[0] = вычисленный XOR принятый
+    sbrc r19, 0
+    rjmp parity_error
 
     rcall tpi_bit_h          ; stop 1
     rcall tpi_bit_h          ; stop 2
+    rjmp recv_exit
+
+parity_error:
+    clr r24                  ; return 0 on parity error
+    ldi r18, 1
+    sts tpi_parity_err, r18
+    
+    ; Добавляем break для сброса TPI state machine таргета
+    ldi r18, 26
+4:  rcall tpi_bit_l          ; break: 26 low bits
+    dec r18
+    brne 4b
+    rcall tpi_bit_h          ; release bus
+
+recv_exit:
     ret
 
 
 /* ---------------------------------------------------------
  *  LOW-LEVEL BIT I/O
  * -------------------------------------------------------*/
-/* tpi_bit_h  --  send '1' bit */
-tpi_bit_h:
+tpi_bit_h:                   ; send '1' (release bus)
     set                      ; T = 1
-/* FALL-THROUGH */
+    rjmp tpi_bit_tx
 
-/* tpi_bit_l  --  send '0' bit */
-tpi_bit_l:
+tpi_bit_l:                   ; send '0' (drive low)
     clt                      ; T = 0
-/* FALL-THROUGH */
+    rjmp tpi_bit_tx
 
-/* tpi_bit  --  exchange 1 bit (open-drain) */
-/* in:  T = bit to send */
-/* out: T = bit received */
-tpi_bit:
-    /* drive DATA = 0 if T==0, else release (pull-up) */
-    brtc 1f
-    sbi _SFR_IO_ADDR(TPI_DATA_PORT), TPI_DATA_PIN ; release
+tpi_bit_tx:                  ; exchange 1 bit (open-drain via DDR)
+    brts 1f
+    ; Drive low: PORT=0, DDR=1
+    cbi _SFR_IO_ADDR(TPI_DATA_PORT), TPI_DATA_PIN
+    sbi _SFR_IO_ADDR(TPI_DATA_DDR),  TPI_DATA_PIN
     rjmp 2f
-1:  cbi _SFR_IO_ADDR(TPI_DATA_PORT), TPI_DATA_PIN ; drive low
+1:  ; Release: PORT=1 (pull-up), DDR=0 (input)
+    sbi _SFR_IO_ADDR(TPI_DATA_PORT), TPI_DATA_PIN
+    cbi _SFR_IO_ADDR(TPI_DATA_DDR),  TPI_DATA_PIN
 2:
-    /* delay low half */
-    rcall tpi_delay
+    rcall tpi_delay          ; t_low
 
-    /* CLK high */
-    sbi _SFR_IO_ADDR(TPI_CLK_PORT),  TPI_CLK_PIN
+    sbi _SFR_IO_ADDR(TPI_CLK_PORT), TPI_CLK_PIN ; CLK high
 
-    /* sample DATA */
-    in  r30, _SFR_IO_ADDR(TPI_DATA_IN)
-    bst r30, TPI_DATA_PIN
+    rcall tpi_delay          ; t_high (slave drives response)
 
-    /* delay high half */
-    rcall tpi_delay
+    in  r25, _SFR_IO_ADDR(TPI_DATA_IN)
+    bst r25, TPI_DATA_PIN    ; T = sampled bit
 
-    /* CLK low */
-    cbi _SFR_IO_ADDR(TPI_CLK_PORT),  TPI_CLK_PIN
+    cbi _SFR_IO_ADDR(TPI_CLK_PORT), TPI_CLK_PIN ; CLK low
     ret
 
 
 /* ---------------------------------------------------------
- *  DELAY  (t_low = t_high = tpi_dly_cnt cycles)
+ *  DELAY (Safe against 0, uses r26/r27 to NOT clobber r24!)
  * -------------------------------------------------------*/
 tpi_delay:
-    lds r30, tpi_dly_cnt
-    lds r31, tpi_dly_cnt+1
-1:  sbiw r30, 1
-    brsh 1b
+    lds r26, tpi_dly_cnt
+    lds r27, tpi_dly_cnt+1
+    sbiw r26, 0              ; Проверяем, если r27:r26 == 0
+    breq delay_ret
+1:  sbiw r26, 1
+    brne 1b
+delay_ret:
     ret
-
 
 /* ---------------------------------------------------------
- *  BLOCK READ / WRITE
- * -------------------------------------------------------*/
-/* void tpi_read_block(uint16_t length, uint8_t *buf) */
-/* r20 = length, r22:r23 = buf */
-tpi_read_block:
-    rcall tpi_pr_update      ; PR = address (already in r24:r25)
-1:  ldi r24, TPI_OP_SLD_INC
-    rcall tpi_send_byte
-    rcall tpi_recv_byte      ; r24 = data
-    st  X+, r24
-    dec r20
-    brne 1b
-    ret
-
-
-/* void tpi_write_block(uint16_t length, uint8_t *buf) */
-tpi_write_block:
-    rcall tpi_pr_update
-1:  ldi r24, TPI_OP_SOUT(NVMCMD)
-    rcall tpi_send_byte
-    ldi r24, NVMCMD_WORD_WRITE
-    rcall tpi_send_byte
-    ldi r24, TPI_OP_SST_INC
-    rcall tpi_send_byte
-    ld  r24, X+
-    rcall tpi_send_byte
-    /* wait NVM ready */
-2:  ldi r24, TPI_OP_SIN(NVMCSR)
-    rcall tpi_send_byte
-    rcall tpi_recv_byte
-    andi r24, NVMCSR_BSY
-    brne 2b
-    dec r20
-    brne 1b
-    ret
-
-
-/* ---------------------------------------------------------
- *  UPDATE POINTER REGISTER  (PR = r25:r24)
+ *  UPDATE POINTER REGISTER (PR = r25:r24)
  * -------------------------------------------------------*/
 tpi_pr_update:
-    movw r20, r24
-    ldi r24, TPI_OP_SSTPR(0)
+    movw r22, r24            ; r23:r22 = addr
+    ldi r24, TPI_OP_SSTPR(0) ; Макрос команды TPI (0x68)
     rcall tpi_send_byte
-    mov r24, r20
+    mov r24, r22             ; addr low (SPL)
     rcall tpi_send_byte
-    ldi r24, TPI_OP_SSTPR(1)
+    ldi r24, TPI_OP_SSTPR(1) ; Макрос команды TPI (0x69)
     rcall tpi_send_byte
-    mov r24, r21
+    mov r24, r23             ; addr high (SPH)
     rcall tpi_send_byte
     ret
 
-; ------- ������ ABI (addr, buf, len) � ���������� addr -------
-.global tpi_read_block_old
-tpi_read_block_old:
-    ; r22:r21 � addr (�� �����)
-    ; r20:r19 � buf
-    ; r18:r17 � len
-    movw r22, r20        ; buf -> X
-    movw r20, r18        ; len -> r20
-    rjmp tpi_read_block  ; �������� ����� ����������
-
-.global tpi_write_block_old
-tpi_write_block_old:
-    movw r22, r20
-    movw r20, r18
-    rjmp tpi_write_block
