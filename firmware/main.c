@@ -1,4 +1,4 @@
-﻿/*
+/*
  * USBasp - USB in-circuit programmer for Atmel AVR controllers
  *
  * Thomas Fischl <tfischl@gmx.de>
@@ -84,7 +84,7 @@ static inline uint8_t is_power_of_two16(uint16_t v) {
    * data[6:7] -> wLength: реальный размер полезных данных в ЭТОМ конкретном USB-пакете (макс 255/64 байта). 
 */
 static void setupTransfer(uint8_t *data, uint8_t new_state) {
-    uint8_t *p_addr = (uint8_t*)&prog_address;  // ← УКАЗАТЕЛЬ
+    uint8_t *p_addr = (uint8_t *)&prog_address;  // ← УКАЗАТЕЛЬ
     p_addr[0] = data[2];
     p_addr[1] = data[3];
     
@@ -521,7 +521,7 @@ uint8_t usbFunctionRead(uint8_t *data, uint8_t len)
     }
 
     ledGreenOff();
-    ledRedOff();
+    ledRedOn();
     return len;
 }
 
@@ -679,32 +679,13 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t len)
     } else {
         retVal = 0;   /* more chunks expected */
     }
- 
-   exit:
-      ledGreenOff();
-      ledRedOff();
-      return retVal;
+
+exit:
+    ledGreenOff();
+    ledRedOn();
+    return retVal;
 }
 
-void init_frequency_generator(void) {
-    // Сброс таймера1
-    TCCR1A = 0;
-    TCCR1B = 0;
-    
-       // Установить режим CTC
-    TCCR1B |= (1 << WGM12);
-    
-    // Установить предделитель на 8
-    TCCR1B |= (1 << CS11);
-    
-    // Установить значение для сравнения
-    // Для 1 МГц с 16 МГц тактовой частотой: 16 МГц / 8 / 2 = 1000
-    OCR1A = 1000; 
-    
-    // Включить выход на OC1A (PB1)
-    TCCR1A |= (1 << COM1A0);
-
-}
 int main(void) {
 
     // 1. САМОЕ ПЕРВОЕ ДЕЛО: запускаем таймер! 
@@ -713,28 +694,23 @@ int main(void) {
 
     /* no pullups on USB and ISP pins */
     PORTD = 0;
-
-    /* --- USB D+ (PD2) и D- (PD7) --- */
-    PORTD &= ~((1 << PD2) | (1 << PD7)); // D+ и D- = 0
-    DDRD  |= (1 << PD2) | (1 << PD7);    // выходы, low
-
+    PORTB = 0;
+    
+    /* Output SE0 for USB reset */
+    PORTB &= ~((1 << PB1) | (1 << PB0)); // D+ и D- = 0
+    DDRB |= (1 << PB1) | (1 << PB0); 	 // выходы, low	
+    
     // Ждем 63 мс (200 * 320us = 64 мс)
-    clockWait(200);                        // ?10 мс (USB 2.0 spec)
-
-    DDRD  &= ~((1 << PD2) | (1 << PD7)); // возвращаем во входы
-
-    // Теперь настраиваем порт B: все входы, кроме PB1
-    DDRB = 0;   // все пины порта B как входы
-    DDRB |= (1 << PB1);   // PB1 как выход
+    clockWait(200);           
+    DDRB = 0;                // возвращаем во входы
 
     /* Инициализация порта C: светодиоды и подтяжки для входов */
-    DDRC = (1 << PC0) | (1 << PC1);  // Только PC0 и PC1 как выходы
+    DDRC = (1 << PC0) | (1 << PC1);  
     DDRC &= ~(1 << PC2);
-    // Включим подтяжки для остальных пинов, включая PC2
     PORTC |= (1 << PC2) | (1 << PC3) | (1 << PC4) | (1 << PC5);
-
+   
     /* ----------- индикация ----------- */
-    
+
     ledRedOn();
     // Ждем 127 мс (2 раза по 200 * 320us = 128 мс)
     clockWait(200);
@@ -746,13 +722,9 @@ int main(void) {
     clockWait(200);
     
     ledGreenOff();
-
+    ledRedOn();
+   
     /* ----------- USB ----------- */
-
-    /* Инициализация генератора частоты */
-    init_frequency_generator();
-
-    /* main event loop */
     usbInit();
 
     sei();
@@ -762,3 +734,4 @@ int main(void) {
     }
     return 0;
 }
+
