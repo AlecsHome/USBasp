@@ -17,6 +17,9 @@
 #include "usbasp.h"
 #include "i2c.h"
 
+// Добавляем в начало isp.c, после инклудов
+#define ADDR_BYTE(addr, n) (((uint8_t *)&(addr))[n])
+
 /* ------------------------------------------------------------------ */
 /* Globals                                                             */
 /* ------------------------------------------------------------------ */
@@ -338,86 +341,69 @@ void ispUpdateExtended(uint8_t ext_addr) {
 }
 
 uint8_t ispReadFlash(uint32_t address) {
-    uint8_t *p = (uint8_t *)&address;
-
-    ispTransmit(0x20 | ((p[0] & 1) << 3));              /* even/odd byte select */
-    ispTransmit((p[1] >> 1) | ((p[2] & 1) << 7));       /* A15..A1 + A16 */
-    ispTransmit((p[0] >> 1) | ((p[1] & 1) << 7));       /* A7..A0 */
+    // Убрали uint8_t *p = (uint8_t *)&address;
+    ispTransmit(0x20 | ((ADDR_BYTE(address, 0) & 1) << 3));
+    ispTransmit((ADDR_BYTE(address, 1) >> 1) | ((ADDR_BYTE(address, 2) & 1) << 7));
+    ispTransmit((ADDR_BYTE(address, 0) >> 1) | ((ADDR_BYTE(address, 1) & 1) << 7));
     return ispTransmit(0);
 }
 
 uint8_t ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode) {
-    uint8_t *p = (uint8_t *)&address;
-
-    ispTransmit(0x40 | ((p[0] & 1) << 3));
-    ispTransmit((p[1] >> 1) | ((p[2] & 1) << 7));
-    ispTransmit((p[0] >> 1) | ((p[1] & 1) << 7));
+    ispTransmit(0x40 | ((ADDR_BYTE(address, 0) & 1) << 3));
+    ispTransmit((ADDR_BYTE(address, 1) >> 1) | ((ADDR_BYTE(address, 2) & 1) << 7));
+    ispTransmit((ADDR_BYTE(address, 0) >> 1) | ((ADDR_BYTE(address, 1) & 1) << 7));
     ispTransmit(data);
 
-    if (!pollmode)
-        return 0;   /* paged mode: data just goes into the page buffer */
+    if (!pollmode) return 0;
 
-    /* polled mode (legacy chips): verify with up to ~6.4 ms of polling */
     if (data != 0xFF) {
         for (uint8_t t = 0; t < 20; t++) {
-            if (ispReadFlash(address) == data)
-                return 0;
+            if (ispReadFlash(address) == data) return 0;
             clockWait(1);
         }
     }
-    clockWait(15);  /* blind 4.8 ms wait for erasing 0xFF bytes */
+    clockWait(15);
     return 0;
 }
 
-/* Write out the page buffer to flash (page-mode write, 0x4C).
- * The address is rounded down to the page boundary first.
- * NOTE: prog_pagesize is kept in BYTES (setupTransfer converts avrdude's
- * word count once), so the mask can be applied directly. */
 uint8_t ispFlushPage(uint32_t address) {
-    uint8_t *p = (uint8_t *)&address;
-
+    // БЕЗОПАСНОЕ маскирование адреса на начало страницы.
+    // Используем математику вместо указателей, чтобы избежать Strict Aliasing.
     if (prog_pagesize > 0) {
-        uint16_t mask = ~(uint16_t)(prog_pagesize - 1);
-        p[0] &= (uint8_t)mask;
-        p[1] &= (uint8_t)(mask >> 8);
+        address &= ~((uint32_t)prog_pagesize - 1);
     }
 
     ispTransmit(0x4C);
-    ispTransmit((p[1] >> 1) | ((p[2] & 1) << 7));   /* includes bit A17 */
-    ispTransmit((p[0] >> 1) | ((p[1] & 1) << 7));
+    // Теперь читаем байты из уже измененной переменной address
+    ispTransmit((ADDR_BYTE(address, 1) >> 1) | ((ADDR_BYTE(address, 2) & 1) << 7));
+    ispTransmit((ADDR_BYTE(address, 0) >> 1) | ((ADDR_BYTE(address, 1) & 1) << 7));
     ispTransmit(0);
 
-    clockWait(15);      /* page write takes max 4.5 ms */
+    clockWait(15);
     return 0;
 }
 
 uint8_t ispReadEEPROM(uint16_t address) {
-    uint8_t *p = (uint8_t *)&address; // ИСПРАВЛЕНО: пробел перед *
-    
     ispTransmit(0xA0);
-    ispTransmit(p[1]);                 // Унифицировано: используем указатели вместо сдвигов
-    ispTransmit(p[0]);
+    ispTransmit(ADDR_BYTE(address, 1));
+    ispTransmit(ADDR_BYTE(address, 0));
     return ispTransmit(0);
 }
 
 uint8_t ispWriteEEPROM(uint16_t address, uint8_t data) {
-    uint8_t *p = (uint8_t *)&address; // ИСПРАВЛЕНО: пробел перед *
-    
     ispTransmit(0xC0);
-    ispTransmit(p[1]);
-    ispTransmit(p[0]);
+    ispTransmit(ADDR_BYTE(address, 1));
+    ispTransmit(ADDR_BYTE(address, 0));
     ispTransmit(data);
 
-    // УВЕЛИЧЕННЫЙ ТАЙМАУТ: 25 итераций (~8 мс)
-    for (uint8_t t = 25; t; --t) {
+    // УВЕЛИЧЕННЫЙ ТАЙМАУТ: 32 итерации (~10.2 мс)
+    for (uint8_t t = 32; t; --t) {
         clockWait(1);
         if (ispReadEEPROM(address) == data) {
-            return 0; // Запись успешна
+            return 0; 
         }
     }
 
-    return 1; // Таймаут: EEPROM не ответила за 8 мс
+    return 1; 
 }
-
-
 

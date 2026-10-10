@@ -653,8 +653,7 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t len)
             uint8_t *src = data;
 
             do {
-                if (ispWriteEEPROM((uint16_t)prog_address, *src++) != 0) {
-                    /* Timeout waiting for the device: abort transaction. */
+                if (ispWriteEEPROM(prog_address, *src++) != 0) { // Убрали каст
                     endTransfer();
                     retVal = 1;
                     goto exit;
