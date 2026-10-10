@@ -36,14 +36,6 @@
 #define CS_LOW()	ISP_OUT &= ~(1 << ISP_RST); /* RST low */
 #define CS_HI()		ISP_OUT |= (1 << ISP_RST); /* RST high */
 
-// Идеальный макрос: объединяет быструю проверку переполнения 16 бит 
-// и вызов функции обновления. Компилятор inline-ит это без накладных расходов.
-#define UPDATE_EXT_ADDR_IF_CROSSED(addr) do { \
-    if ((uint16_t)(addr) == 0) { \
-        ispUpdateExtended(addr); \
-    } \
-} while(0)
-
 extern uint8_t (*ispTransmit)(uint8_t);
 
 //extern uint16_t prog_pagesize;
@@ -91,8 +83,6 @@ uint8_t ispWriteEEPROM(uint16_t address, uint8_t data);
 
 /* set SCK speed. call before ispConnect! */
 void ispSetSCKOption(uint8_t option);
-
-void spibusy(void);
 
 void ispUpdateExtended(uint8_t ext_addr);
 
