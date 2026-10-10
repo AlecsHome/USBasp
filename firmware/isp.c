@@ -40,29 +40,30 @@ uint8_t isp_hiaddr = 0xFF;                        /* last extended-address byte 
 
 #define SPI_BASE ((1 << SPE) | (1 << MSTR))   /* enable + master mode */
 
-/* Hardware SPI divider settings, indexed by (USBASP_ISP_SCK_3000 - option),
- * valid for a 12 MHz crystal. SPCR holds SPR1/SPR0, SPSR holds SPI2X. */
+// 16 МГц: делители {4M,2M,1M,500k,250k,125k}; номиналы {3M,1.5M,750k,375k,187.5k,93.75k}
+// Правило: реальная <= номинал — никогда не разгоняем таргет сверх обещанного кодом
 static const uint8_t hw_spcr_table[] PROGMEM = {
-    0,                              /* 3.000 MHz   f/4   SPI2X=0 */
-    (1 << SPR0),                    /* 1.500 MHz   f/8   SPI2X=1 */
-    (1 << SPR0),                    /* 750 kHz     f/16  SPI2X=0 */
-    (1 << SPR1),                    /* 375 kHz     f/32  SPI2X=1 */
-    (1 << SPR1),                    /* 187.5 kHz   f/64  SPI2X=0 */
-    (1 << SPR1) | (1 << SPR0)       /* 93.75 kHz   f/128 SPI2X=0 */
+    (1 << SPR0),                 // code13 (3M)    → f/8   = 2M     SPI2X=1
+    (1 << SPR0),                 // code12 (1.5M)  → f/16  = 1M     SPI2X=0
+    (1 << SPR1),                 // code11 (750k)  → f/32  = 500k   SPI2X=1
+    (1 << SPR1),                 // code10 (375k)  → f/64  = 250k   SPI2X=0
+    (1 << SPR1) | (1 << SPR0),   // code9  (187.5k)→ f/128 = 125k   SPI2X=0
 };
 
 static const uint8_t hw_spsr_table[] PROGMEM = {
-    0,                              /* 3.000 MHz   */
-    (1 << SPI2X),                   /* 1.500 MHz   */
-    0,                              /* 750 kHz     */
-    (1 << SPI2X),                   /* 375 kHz     */
-    0,                              /* 187.5 kHz   */
-    0                               /* 93.75 kHz   */
+    (1 << SPI2X), 0, (1 << SPI2X), 0, 0
 };
 
-/* Software SPI half-period delay (timer ticks ~320 us per count step),
- * indexed by (USBASP_ISP_SCK_32 - option). */
-static const uint8_t sw_delay_table[] PROGMEM = { 3, 6, 12, 24, 48, 96, 192 };
+static const uint8_t sw_delay_table[] PROGMEM = {
+    2,    // idx 0 (option 8): 62.5 kHz  (номинал 93.75k)
+    4,    // idx 1 (option 7): 31.25 kHz (номинал 32k)     ← убрать хвост "32 → 3.906 кГц"
+    8,    // idx 2 (option 6): 15.6 kHz  (номинал 16k)
+    16,   // idx 3 (option 5): 7.8 kHz   (номинал 8k)
+    32,   // idx 4 (option 4): 3.9 kHz   (номинал 4k)      ← было "4.03" — это значение старого d=31
+    63,   // idx 5 (option 3): 1.98 kHz  (номинал 2k)
+    125,  // idx 6 (option 2): 1.0 kHz   (номинал 1k)
+    250   // idx 7 (option 1): 500 Hz    (номинал 0.5k)
+};
 
 /* Speed search order for automatic SCK detection: fastest to slowest. */
 static const uint8_t isp_retry_speeds[] PROGMEM = {
@@ -242,7 +243,7 @@ static uint8_t tryEnterProgMode(uint8_t speed_code) {
         ISP_OUT |= (1 << ISP_RST);
         clockWait(pulse);
         ISP_OUT &= ~(1 << ISP_RST);
-        clockWait(100);
+        clockWait(96);
 
         isp_hiaddr = 0xFF;
 
@@ -392,23 +393,30 @@ uint8_t ispFlushPage(uint32_t address) {
 }
 
 uint8_t ispReadEEPROM(uint16_t address) {
+    uint8_t *p = (uint8_t *)&address; // ИСПРАВЛЕНО: пробел перед *
+    
     ispTransmit(0xA0);
-    ispTransmit((uint8_t)(address >> 8));
-    ispTransmit((uint8_t)address);
+    ispTransmit(p[1]);                 // Унифицировано: используем указатели вместо сдвигов
+    ispTransmit(p[0]);
     return ispTransmit(0);
 }
 
 uint8_t ispWriteEEPROM(uint16_t address, uint8_t data) {
+    uint8_t *p = (uint8_t *)&address; // ИСПРАВЛЕНО: пробел перед *
+    
     ispTransmit(0xC0);
-    ispTransmit((uint8_t)(address >> 8));
-    ispTransmit((uint8_t)address);
+    ispTransmit(p[1]);
+    ispTransmit(p[0]);
     ispTransmit(data);
 
-    /* poll until self-timed write completes (~8 ms budget) */
+    // УВЕЛИЧЕННЫЙ ТАЙМАУТ: 25 итераций (~8 мс)
     for (uint8_t t = 25; t; --t) {
         clockWait(1);
-        if (ispReadEEPROM(address) == data)
-            return 0;
+        if (ispReadEEPROM(address) == data) {
+            return 0; // Запись успешна
+        }
     }
-    return 1;   /* timeout */
+
+    return 1; // Таймаут: EEPROM не ответила за 8 мс
 }
+

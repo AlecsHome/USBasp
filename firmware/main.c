@@ -1,4 +1,4 @@
-/*
+﻿/*
  * USBasp - USB in-circuit programmer for Atmel AVR controllers
  *
  * Thomas Fischl <tfischl@gmx.de>
@@ -84,7 +84,7 @@ static inline uint8_t is_power_of_two16(uint16_t v) {
    * data[6:7] -> wLength: реальный размер полезных данных в ЭТОМ конкретном USB-пакете (макс 255/64 байта). 
 */
 static void setupTransfer(uint8_t *data, uint8_t new_state) {
-    uint8_t *p_addr = (uint8_t*)&prog_address;
+    uint8_t *p_addr = (uint8_t*)&prog_address;  // ← УКАЗАТЕЛЬ
     p_addr[0] = data[2];
     p_addr[1] = data[3];
     
@@ -102,19 +102,15 @@ static void setupTransfer(uint8_t *data, uint8_t new_state) {
     // Инициализация страничной записи
     if (new_state == PROG_STATE_WRITEFLASH) {
         uint16_t windex = ((uint16_t)data[5] << 8) | data[4];
-        prog_pagesize = windex; // avrdude передает размер страницы в СЛОВАХ в wIndex
-
-        // ЗАЩИТА ОТ КРИВОГО РАЗМЕРА СТРАНИЦЫ.
-        // prog_pagecounter считается в БАЙТАХ: одна страница = 2 * words.
-        // Любое некорректное значение (0, переполнение, не степень двойки)
-        // включает безопасный побайтовый режим записи.
-        uint16_t page_bytes = (uint16_t)(windex << 1);
-        if (is_power_of_two16(windex) && page_bytes > windex) {
+        prog_pagesize = windex; // avrdude передает размер страницы в wIndex
+        
+        // ЗАЩИТА ОТ КРИВОГО РАЗМЕРА СТРАНИЦЫ
+        if (prog_pagesize > 0 && (prog_pagesize & (prog_pagesize - 1)) == 0) {
             uint16_t low_addr = ((uint16_t)data[3] << 8) | data[2];
-            prog_pagesize = page_bytes;   // байт-размер страницы для ispFlushPage/счётчика
             prog_pagecounter = prog_pagesize - (low_addr & (prog_pagesize - 1));
         } else {
-            prog_pagesize = 0;
+            // Если размер не степень двойки (например 100) или 0 - безопасный побайтовый режим
+            prog_pagesize = 0; 
             prog_pagecounter = 0;
         }
     }
@@ -147,7 +143,8 @@ void tpi_read_block_c(uint16_t addr, uint8_t *buf, uint16_t len) {
         tpi_send_byte(TPI_OP_SLD_INC);
         *buf = tpi_recv_byte();
         if (tpi_parity_err) {               // битый байт не уедет хосту молча
-            endTransfer();
+            prog_state = PROG_STATE_IDLE;
+            prog_nbytes = 0;
             return;
         }
         buf++;
@@ -162,7 +159,8 @@ void tpi_write_block_c(uint16_t addr, uint8_t *buf, uint16_t len) {
         tpi_send_byte(TPI_OP_SST_INC);
         tpi_send_byte(*buf++);
         if (tpi_waitbusy() != 0) {
-            endTransfer();                  // короткий трансфер → avrdude увидит ошибку
+            prog_state = PROG_STATE_IDLE;
+            prog_nbytes = 0;                // короткий трансфер → avrdude увидит ошибку
             return;
         }
     }
@@ -409,32 +407,24 @@ usbMsgLen_t usbFunctionSetup(uint8_t data[8]) {
 
 uint8_t usbFunctionRead(uint8_t *data, uint8_t len)
 {
-    // ЗАЩИТА ОТ НУЛЕВОЙ ДЛИНЫ ПАКЕТА
+    /* Guard against zero-length packets. */
     if (len == 0) return 0;
 
-    /* Быстрая проверка: если не «читаем» – сразу выход */
-    if ((prog_state != PROG_STATE_READFLASH)  &&
-        (prog_state != PROG_STATE_READEEPROM) &&
-        (prog_state != PROG_STATE_TPI_READ)   &&
-        (prog_state != PROG_STATE_SPI_READ)   &&
-        (prog_state != PROG_STATE_MW_READ)    &&
-        (prog_state != PROG_STATE_I2C_READ)) {
-        goto exit_unsupported;
-    }
-
-    /* Оптимизация: определяем реальную длину один раз */
-    len = min_u8_u16(len, prog_nbytes);
+    /* Green LED marks an active read transfer (one write per chunk). */
     ledGreenOn();
+
+    /* Clamp to the number of bytes still pending in this transfer. */
+    len = min_u8_u16(len, prog_nbytes);
 
     switch (prog_state) {
 
-	/* ---------- TPI – быстро отдельно --- */
+        /* ---------- TPI read ---------- */
         case PROG_STATE_TPI_READ:
-            tpi_read_block_c(prog_address, data, len); // Используем C-функцию
+            tpi_read_block_c(prog_address, data, len);
             prog_address += len;
             break;
 
-        /* ---------- SPI (Чтение) ----------- */
+        /* ---------- SPI read ---------- */
         case PROG_STATE_SPI_READ: {
             uint8_t count = len;
             uint8_t *dst = data;
@@ -446,25 +436,24 @@ uint8_t usbFunctionRead(uint8_t *data, uint8_t len)
             break;
         }
 
-        /* ---------- I2C Read ---------- */
+        /* ---------- I2C read ---------- */
         case PROG_STATE_I2C_READ: {
             uint8_t count = len;
             uint8_t *dst = data;
 
             do {
-                prog_nbytes--; // Сначала уменьшаем глобальный счетчик оставшихся байт
-
-                // Если после декремента prog_nbytes == 0, значит мы читаем САМЫЙ ПОСЛЕДНИЙ байт транзакции
-                uint8_t ack = (prog_nbytes == 0) ? I2C_NACK : I2C_ACK;
-                *dst++ = i2c_read_byte(ack);
+                /* Decrement first: when it reaches 0 we are shifting out
+                 * the very last byte of the transaction -> send NACK. */
+                prog_nbytes--;
+                *dst++ = i2c_read_byte(prog_nbytes == 0 ? I2C_NACK : I2C_ACK);
             } while (--count);
 
-            // prog_nbytes уже обновлен внутри цикла! Ничего вычитать не нужно.
+            /* prog_nbytes was already updated inside the loop. */
             if (prog_nbytes == 0) i2c_stop();
             break;
         }
 
-        /* ---------- MW Read ---------- */
+        /* ---------- Microwire read ---------- */
         case PROG_STATE_MW_READ: {
             uint8_t count = len;
             uint8_t *dst = data;
@@ -477,20 +466,20 @@ uint8_t usbFunctionRead(uint8_t *data, uint8_t len)
             break;
         }
 
-        /* ---------- Чтение READFLASH ---------- */
+        /* ---------- Flash read (with extended addressing) ---------- */
         case PROG_STATE_READFLASH: {
             uint32_t addr = prog_address;
             uint8_t *dst = data;
             uint8_t count = len;
 
-            // Обязательно обновляем расширенный адрес в начале чанка
+            /* Make sure the extended address is up to date at chunk start. */
             ispUpdateExtended(EXT_ADDR_BYTE(addr) >> 1);
 
             do {
                 *dst++ = ispReadFlash(addr);
                 addr++;
 
-                // Переход через границу 64 КБ
+                /* Crossed the 64 KB boundary -> refresh extended address. */
                 if ((uint16_t)addr == 0) {
                     ispUpdateExtended(EXT_ADDR_BYTE(addr) >> 1);
                 }
@@ -501,238 +490,221 @@ uint8_t usbFunctionRead(uint8_t *data, uint8_t len)
             break;
         }
 
-        /* ---------- Чтение EEPROM ---------- */
+        /* ---------- EEPROM read ---------- */
         case PROG_STATE_READEEPROM: {
-            // EEPROM не нуждается в extended адресе (максимум 64К)
-            // Используем быстрый 16-битный адрес в цикле
+            /* EEPROM never needs the extended address (max 64 KB),
+             * so a fast 16-bit running address is enough. */
             uint16_t addr = (uint16_t)prog_address;
             uint8_t *dst = data;
-            uint8_t count = len; // len уже посчитан как MIN(len, prog_nbytes) в начале функции!
+            uint8_t count = len;
 
             do {
                 *dst++ = ispReadEEPROM(addr++);
             } while (--count);
 
-            prog_address += len; // Обновляем глобальный 32-битный адрес
-            prog_nbytes -= len;  // Вычитаем ровно столько, сколько прочитали
+            prog_address += len;
+            prog_nbytes -= len;
             break;
         }
 
+        /* Not a read state: unsupported vendor request. */
         default:
-            goto exit_unsupported;
+            ledGreenOff();
+            return 0xFF;
     }
 
-    /* Единый пост-обработчик: TPI сам аварийно завершил трансфер при
-     * ошибке четности (prog_nbytes обнулен) - передаём хосту короткий пакет. */
+    /* Common post-handler: a finished transfer (or one that TPI aborted on
+     * a parity error by zeroing prog_nbytes) returns to idle and lets V-USB
+     * terminate with a short packet. */
     if (prog_nbytes == 0) {
         prog_state = PROG_STATE_IDLE;
     }
 
-  exit_unsupported:
     ledGreenOff();
-    return 0xFF;
-
-    /* Единый выход успешного чтения */
-    ledGreenOff();
-    ledRedOn();
+    ledRedOff();
     return len;
 }
 
 uint8_t usbFunctionWrite(uint8_t *data, uint8_t len)
-{ 
-    uint8_t retVal = 0; 
+{
+    uint8_t retVal;
 
-        // ЗАЩИТА ОТ НУЛЕВОЙ ДЛИНЫ ПАКЕТА
-        if (len == 0) return 0;
+    /* Guard against zero-length packets. */
+    if (len == 0) return 0;
 
-	/* быстрая проверка режима */
-	if (prog_state == PROG_STATE_IDLE) return 0xFF;
-    
-		if ((prog_state != PROG_STATE_WRITEFLASH)  &&
-	           (prog_state != PROG_STATE_WRITEEEPROM) &&
-	           (prog_state != PROG_STATE_TPI_WRITE)   &&
-	           (prog_state != PROG_STATE_SPI_WRITE)   &&
-	           (prog_state != PROG_STATE_MW_WRITE)    &&
-	           (prog_state != PROG_STATE_I2C_WRITE)) return 0xFF;
+    /* Green LED marks an active write transfer (one write per chunk). */
+    ledGreenOn();
 
-	    	// ОГРАНИЧИВАЕМ LEN ОДИН РАЗ В НАЧАЛЕ!
-	    	len = min_u8_u16(len, prog_nbytes);
-	    	ledGreenOn();
+    /* Clamp to the number of bytes still pending - once, up front. */
+    len = min_u8_u16(len, prog_nbytes);
 
-    	/* ---------- TPI ---------- */
-	if (prog_state == PROG_STATE_TPI_WRITE) {
-		tpi_write_block_c(prog_address, data, len);
-		prog_address += len;
-	        prog_nbytes  -= len;
-	       
-	        if (prog_nbytes == 0) {
-	            prog_state = PROG_STATE_IDLE;
-	            retVal = 1; // Транзакция завершена
-            	  } else {
-                	retVal = 0; // Ждем следующий чанк
-            	}
-	        goto exit;
-	}
+    switch (prog_state) {
 
-	/* ---------- SPI (Запись) ---------- */
-	if (prog_state == PROG_STATE_SPI_WRITE) {
-	  	uint8_t *src = data;
-	        uint8_t count = len; // Используем len напрямую
-        
-	        do {
-	            ispTransmit(*src++);
-	        } while (--count);
-        
-	        prog_nbytes -= len;
-	        if (prog_nbytes == 0) {
-	            if (spi_cs_hi) CS_HI();
-	            prog_state = PROG_STATE_IDLE;
-	            retVal = 1; // Транзакция завершена
-            	  } else {
-                    retVal = 0; // Ждем следующий чанк
-            	}
-	        goto exit;
-	}
+        /* ---------- TPI write ---------- */
+        case PROG_STATE_TPI_WRITE:
+            tpi_write_block_c(prog_address, data, len);
+            prog_address += len;
+            prog_nbytes  -= len;
+            break;
 
-	/* ---------- I2C Write ---------- */
-    	if (prog_state == PROG_STATE_I2C_WRITE) {
-           uint8_t *src = data; 
-           uint8_t count = len;
-        
-           do {
-            if (i2c_send_byte(*src++) == 0) {
-	        prog_state = PROG_STATE_IDLE;
-	        prog_nbytes = 0;
-	        retVal = 1;           // прервать трансфер
-	        goto exit;
-	     }
-           } while (--count);
-             prog_nbytes -= len;
-
-           if (prog_nbytes == 0) { 
-               if(i2c_stop_aw) i2c_stop(); 
-               prog_state = PROG_STATE_IDLE; 
-               retVal = 1; 
-             }
-           goto exit;
-    	}
-
-	/* ---------- MW Write ---------- */
-    	if (prog_state == PROG_STATE_MW_WRITE) {
+        /* ---------- SPI write ---------- */
+        case PROG_STATE_SPI_WRITE: {
+            uint8_t count = len;
             uint8_t *src = data;
-            uint8_t count = len; 
-                        
+
             do {
-                uint8_t bits = (mw_bits_remaining >= 8) ? 8 : mw_bits_remaining;
-                if (bits == 0) break;
-                
-                mwSendData(*src++, bits); // Отправляем N бит из байта
-                mw_bits_remaining -= bits;
+                ispTransmit(*src++);
             } while (--count);
-    
+
             prog_nbytes -= len;
-    
-            if (prog_nbytes == 0) {
-                if (mw_cs_lo) mwEnd(); // Выключаем CS, если попросили
-                prog_state = PROG_STATE_IDLE;
-                retVal = 1; // Транзакция завершена
-              
-              } else {
-              
-                retVal = 0; // Ждем следующий чанк
-            }
-            goto exit;
+            if (prog_nbytes == 0 && spi_cs_hi) CS_HI();
+            break;
         }
 
-	/* ---------- Flash – с extended addressing ---------- */
-	if (prog_state == PROG_STATE_WRITEFLASH) {
+        /* ---------- I2C write ---------- */
+        case PROG_STATE_I2C_WRITE: {
+            uint8_t count = len;
+            uint8_t *src = data;
+
+            do {
+                if (i2c_send_byte(*src++) == 0) {
+                    /* NACK from target: abort the whole transaction and
+                     * report completion so V-USB stops the OUT stream. */
+                    endTransfer();
+                    retVal = 1;
+                    goto exit;
+                }
+            } while (--count);
+
+            prog_nbytes -= len;
+            if (prog_nbytes == 0 && i2c_stop_aw) i2c_stop();
+            break;
+        }
+
+        /* ---------- Microwire write ---------- */
+        case PROG_STATE_MW_WRITE: {
+            uint8_t count = len;
+            uint8_t *src = data;
+
+            while (count--) {
+                uint8_t bits = (mw_bits_remaining >= 8) ? 8 : mw_bits_remaining;
+                if (bits == 0) break;   /* transaction bit-count exhausted */
+
+                mwSendData(*src++, bits);
+                mw_bits_remaining -= bits;
+            }
+
+            prog_nbytes -= len;
+            if (prog_nbytes == 0 && mw_cs_lo) mwEnd();
+            break;
+        }
+
+        /* ---------- Flash write (paged or byte-wise, ext. addressing) ---------- */
+        case PROG_STATE_WRITEFLASH: {
             uint32_t addr = prog_address;
             uint8_t *src = data;
             uint8_t count = len;
             uint8_t paged = (prog_pagesize != 0);
 
-            // Обновляем расширенный адрес (бит 17)
+            /* Refresh the extended address (bit A17) at chunk start. */
             ispUpdateExtended(EXT_ADDR_BYTE(addr) >> 1);
 
             do {
                 if (!paged) {
-                    // Старый чип (побайтовая запись с ожиданием)
+                    /* Legacy chip: byte-wise write with busy-wait. */
                     ispWriteFlash(addr, *src++, 1);
                 } else {
-                    // Современный чип (грузим в буфер)
+                    /* Modern chip: load into page buffer. */
                     ispWriteFlash(addr, *src++, 0);
-                    
-                    // Дошли до границы страницы? Записываем!
+
+                    /* Page boundary reached -> commit it. */
                     if (--prog_pagecounter == 0) {
-                        // ИСПРАВЛЕНО: Никаких uint32_t масок в main.c!
-                        // Передаем адрес как есть, а ispFlushPage сам его обрежет.
-                        ispFlushPage(addr); 
+                        ispFlushPage(addr);   /* ispFlushPage masks the addr */
                         prog_pagecounter = prog_pagesize;
                     }
                 }
-        
+
                 addr++;
-        
-                // Переход через границу 64 КБ
+
+                /* Crossed the 64 KB boundary -> refresh extended address. */
                 if ((uint16_t)addr == 0) {
                     ispUpdateExtended(EXT_ADDR_BYTE(addr) >> 1);
                 }
-
             } while (--count);
-    
-            // Сохраняем прогресс
-            prog_address = addr; 
+
+            prog_address = addr;
             prog_nbytes -= len;
 
             if (prog_nbytes == 0) {
-                prog_state = PROG_STATE_IDLE;
-
-                // Запись хвоста (если файл не кратен странице)
-                if (prog_pagesize != 0 && prog_pagecounter != prog_pagesize) {
-                    // ИСПРАВЛЕНО (Ошибка №5): Обновляем extended адрес перед flush хвоста!
+                /* Flush the tail page when the file is not page-aligned. */
+                if (paged && prog_pagecounter != prog_pagesize) {
+                    /* Refresh ext. address and step back into the last
+                     * partially loaded page before flushing. */
                     ispUpdateExtended(EXT_ADDR_BYTE(prog_address) >> 1);
-                    // ИСПРАВЛЕНО: отнимаем 1, чтобы попасть в последнюю записанную страницу!
                     ispFlushPage(prog_address - 1);
                 }
-                 retVal = 1; // Транзакция завершена
-            } else {
-                retVal = 0; // Ждем следующий чанк
             }
-            goto exit;
+            break;
         }
-        
-        /* ---------- EEPROM ---------- */
-	if (prog_state == PROG_STATE_WRITEEEPROM) {
-	    uint8_t *src = data;
-	    uint8_t count = len; // V-USB передает максимум 255 байт, uint8_t достаточно!
-        
-	        do {
-	            if (ispWriteEEPROM((uint16_t)prog_address, *src++) != 0) {
-	                prog_state = PROG_STATE_IDLE;
-	                retVal = 1;
-	                goto exit;
-	            }
-	            prog_address++;
-	        } while (--count);
-        
-	        prog_nbytes -= len;
-	        if (prog_nbytes == 0) {
-	            prog_state = PROG_STATE_IDLE;
-	            retVal = 1;
-	        } else {
-	            retVal = 0;
-	        }
-	        goto exit;
-	    }
 
-	    retVal = 0xFF;
+        /* ---------- EEPROM write ---------- */
+        case PROG_STATE_WRITEEEPROM: {
+            uint8_t count = len;
+            uint8_t *src = data;
+
+            do {
+                if (ispWriteEEPROM((uint16_t)prog_address, *src++) != 0) {
+                    /* Timeout waiting for the device: abort transaction. */
+                    endTransfer();
+                    retVal = 1;
+                    goto exit;
+                }
+                prog_address++;
+            } while (--count);
+
+            prog_nbytes -= len;
+            break;
+        }
+
+        /* Not a write state: unsupported vendor request. */
+        default:
+            ledGreenOff();
+            return 0xFF;
+    }
+
+    /* Common completion check for all write states. */
+    if (prog_nbytes == 0) {
+        prog_state = PROG_STATE_IDLE;
+        retVal = 1;   /* transfer done: V-USB ACKs the final packet */
+    } else {
+        retVal = 0;   /* more chunks expected */
+    }
  
    exit:
       ledGreenOff();
-      ledRedOn();
+      ledRedOff();
       return retVal;
 }
 
+void init_frequency_generator(void) {
+    // Сброс таймера1
+    TCCR1A = 0;
+    TCCR1B = 0;
+    
+       // Установить режим CTC
+    TCCR1B |= (1 << WGM12);
+    
+    // Установить предделитель на 8
+    TCCR1B |= (1 << CS11);
+    
+    // Установить значение для сравнения
+    // Для 1 МГц с 16 МГц тактовой частотой: 16 МГц / 8 / 2 = 1000
+    OCR1A = 1000; 
+    
+    // Включить выход на OC1A (PB1)
+    TCCR1A |= (1 << COM1A0);
+
+}
 int main(void) {
 
     // 1. САМОЕ ПЕРВОЕ ДЕЛО: запускаем таймер! 
@@ -741,23 +713,28 @@ int main(void) {
 
     /* no pullups on USB and ISP pins */
     PORTD = 0;
-    PORTB = 0;
-    
-    /* Output SE0 for USB reset */
-    PORTB &= ~((1 << PB1) | (1 << PB0)); // D+ и D- = 0
-    DDRB |= (1 << PB1) | (1 << PB0); 	 // выходы, low	
-    
+
+    /* --- USB D+ (PD2) и D- (PD7) --- */
+    PORTD &= ~((1 << PD2) | (1 << PD7)); // D+ и D- = 0
+    DDRD  |= (1 << PD2) | (1 << PD7);    // выходы, low
+
     // Ждем 63 мс (200 * 320us = 64 мс)
-    clockWait(200);           
-    DDRB = 0;                // возвращаем во входы
+    clockWait(200);                        // ?10 мс (USB 2.0 spec)
+
+    DDRD  &= ~((1 << PD2) | (1 << PD7)); // возвращаем во входы
+
+    // Теперь настраиваем порт B: все входы, кроме PB1
+    DDRB = 0;   // все пины порта B как входы
+    DDRB |= (1 << PB1);   // PB1 как выход
 
     /* Инициализация порта C: светодиоды и подтяжки для входов */
-    DDRC = (1 << PC0) | (1 << PC1);  
+    DDRC = (1 << PC0) | (1 << PC1);  // Только PC0 и PC1 как выходы
     DDRC &= ~(1 << PC2);
+    // Включим подтяжки для остальных пинов, включая PC2
     PORTC |= (1 << PC2) | (1 << PC3) | (1 << PC4) | (1 << PC5);
-   
-    /* ----------- индикация ----------- */
 
+    /* ----------- индикация ----------- */
+    
     ledRedOn();
     // Ждем 127 мс (2 раза по 200 * 320us = 128 мс)
     clockWait(200);
@@ -769,9 +746,13 @@ int main(void) {
     clockWait(200);
     
     ledGreenOff();
-    ledRedOn();
-   
+
     /* ----------- USB ----------- */
+
+    /* Инициализация генератора частоты */
+    init_frequency_generator();
+
+    /* main event loop */
     usbInit();
 
     sei();
@@ -781,4 +762,3 @@ int main(void) {
     }
     return 0;
 }
-
