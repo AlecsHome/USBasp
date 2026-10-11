@@ -1,4 +1,4 @@
-/*
+﻿/*
  * USBasp - USB in-circuit programmer for Atmel AVR controllers
  *
  * Thomas Fischl <tfischl@gmx.de>
@@ -8,7 +8,6 @@
  * Creation Date..: 2005-02-20
  * Last change....: 2009-02-28
  *
- * PC2 SCK speed option.
  * GND  -> slow (8khz SCK),
  * open -> software set speed (default is 375kHz SCK)
  */
@@ -33,7 +32,7 @@ static uint8_t requested_sck = USBASP_ISP_SCK_AUTO;   // raw-запрос хос
 
 uint32_t prog_address = 0;
 uint8_t prog_address_high = 0; // Биты 16-23 адреса (совместимость со старыми avrdude) 
-volatile uint8_t prog_address_newmode = 0; // Режим "нового" адреса (3 байта вместо 2)
+uint8_t prog_address_newmode = 0; // Режим "нового" адреса (3 байта вместо 2)
 
 // Управление многостраничной записью Flash (критично для split-writes) 
 uint16_t prog_pagesize = 0;
@@ -72,10 +71,6 @@ static inline uint8_t min_u8_u16(uint8_t a, uint16_t b) {
 static inline void endTransfer(void) {
     prog_state = PROG_STATE_IDLE;
     prog_nbytes = 0;
-}
-
-static inline uint8_t is_power_of_two16(uint16_t v) {
-    return v != 0 && (v & (v - 1)) == 0;
 }
 
 /* -------------------------------------------------------------------------------- */
@@ -173,12 +168,9 @@ usbMsgLen_t usbFunctionSetup(uint8_t data[8]) {
         
 
 	if (data[1] == USBASP_FUNC_CONNECT) {
-        	ispSetSCKOption(prog_sck);
-        	prog_address_newmode = 0;
         	ledRedOn();
         	ispConnect();
-        	replyBuffer[0] = ispEnterProgrammingMode();
-        	len = 1;
+        	ispSetSCKOption(prog_sck);
 
 	} else if (data[1] == USBASP_FUNC_DISCONNECT) {
 		ispDisconnect();
@@ -405,23 +397,27 @@ usbMsgLen_t usbFunctionSetup(uint8_t data[8]) {
     return len;
 }
 
+
 uint8_t usbFunctionRead(uint8_t *data, uint8_t len)
 {
-    /* Guard against zero-length packets. */
+
+    /* Clamp to the number of bytes still pending in this transfer. */
+    len = min_u8_u16(len, prog_nbytes);
+
+        /* Guard against zero-length packets. */
     if (len == 0) return 0;
 
     /* Green LED marks an active read transfer (one write per chunk). */
     ledGreenOn();
-
-    /* Clamp to the number of bytes still pending in this transfer. */
-    len = min_u8_u16(len, prog_nbytes);
 
     switch (prog_state) {
 
         /* ---------- TPI read ---------- */
         case PROG_STATE_TPI_READ:
             tpi_read_block_c(prog_address, data, len);
+            if (prog_state == PROG_STATE_IDLE) return 0xFF; // Ошибка четности
             prog_address += len;
+            prog_nbytes -= len;
             break;
 
         /* ---------- SPI read ---------- */
@@ -521,7 +517,7 @@ uint8_t usbFunctionRead(uint8_t *data, uint8_t len)
     }
 
     ledGreenOff();
-    ledRedOn();
+    ledRedOff();
     return len;
 }
 
@@ -529,20 +525,23 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t len)
 {
     uint8_t retVal;
 
-    /* Guard against zero-length packets. */
-    if (len == 0) return 0;
-
-    /* Green LED marks an active write transfer (one write per chunk). */
-    ledGreenOn();
-
     /* Clamp to the number of bytes still pending - once, up front. */
     len = min_u8_u16(len, prog_nbytes);
+
+    if (len == 0) return 0;
+
+    /* Green LED marks an active write transfer. */
+    ledGreenOn();
 
     switch (prog_state) {
 
         /* ---------- TPI write ---------- */
         case PROG_STATE_TPI_WRITE:
             tpi_write_block_c(prog_address, data, len);
+            if (prog_state == PROG_STATE_IDLE) {
+                ledGreenOff(); // Сбрасываем LED перед аварийным выходом
+                return 0xFF;    // Ошибка NVM
+            }
             prog_address += len;
             prog_nbytes  -= len;
             break;
@@ -565,14 +564,12 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t len)
         case PROG_STATE_I2C_WRITE: {
             uint8_t count = len;
             uint8_t *src = data;
-
             do {
                 if (i2c_send_byte(*src++) == 0) {
-                    /* NACK from target: abort the whole transaction and
-                     * report completion so V-USB stops the OUT stream. */
+                    i2c_stop();
                     endTransfer();
-                    retVal = 1;
-                    goto exit;
+                    ledGreenOff(); // Сбрасываем LED перед аварийным выходом
+                    return 0xFF;    // STALL при NACK
                 }
             } while (--count);
 
@@ -611,22 +608,18 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t len)
 
             do {
                 if (!paged) {
-                    /* Legacy chip: byte-wise write with busy-wait. */
                     ispWriteFlash(addr, *src++, 1);
                 } else {
-                    /* Modern chip: load into page buffer. */
                     ispWriteFlash(addr, *src++, 0);
 
-                    /* Page boundary reached -> commit it. */
                     if (--prog_pagecounter == 0) {
-                        ispFlushPage(addr);   /* ispFlushPage masks the addr */
+                        ispFlushPage(addr);
                         prog_pagecounter = prog_pagesize;
                     }
                 }
 
                 addr++;
 
-                /* Crossed the 64 KB boundary -> refresh extended address. */
                 if ((uint16_t)addr == 0) {
                     ispUpdateExtended(EXT_ADDR_BYTE(addr) >> 1);
                 }
@@ -634,16 +627,6 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t len)
 
             prog_address = addr;
             prog_nbytes -= len;
-
-            if (prog_nbytes == 0) {
-                /* Flush the tail page when the file is not page-aligned. */
-                if (paged && prog_pagecounter != prog_pagesize) {
-                    /* Refresh ext. address and step back into the last
-                     * partially loaded page before flushing. */
-                    ispUpdateExtended(EXT_ADDR_BYTE(prog_address) >> 1);
-                    ispFlushPage(prog_address - 1);
-                }
-            }
             break;
         }
 
@@ -651,12 +634,11 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t len)
         case PROG_STATE_WRITEEEPROM: {
             uint8_t count = len;
             uint8_t *src = data;
-
             do {
-                if (ispWriteEEPROM(prog_address, *src++) != 0) { // Убрали каст
+                if (ispWriteEEPROM(prog_address, *src++) != 0) {
                     endTransfer();
-                    retVal = 1;
-                    goto exit;
+                    ledGreenOff(); // Сбрасываем LED перед аварийным выходом
+                    return 0xFF;    // STALL при таймауте
                 }
                 prog_address++;
             } while (--count);
@@ -671,7 +653,7 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t len)
             return 0xFF;
     }
 
-    /* Common completion check for all write states. */
+    /* Common completion check for all write states (Success path). */
     if (prog_nbytes == 0) {
         prog_state = PROG_STATE_IDLE;
         retVal = 1;   /* transfer done: V-USB ACKs the final packet */
@@ -679,12 +661,30 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t len)
         retVal = 0;   /* more chunks expected */
     }
 
-exit:
     ledGreenOff();
-    ledRedOn();
+    ledRedOff();
     return retVal;
 }
 
+void init_frequency_generator(void) {
+    // Сброс таймера1
+    TCCR1A = 0;
+    TCCR1B = 0;
+    
+       // Установить режим CTC
+    TCCR1B |= (1 << WGM12);
+    
+    // Установить предделитель на 8
+    TCCR1B |= (1 << CS11);
+    
+    // Установить значение для сравнения
+    // Для 1 МГц с 16 МГц тактовой частотой: 16 МГц / 8 / 2 = 1000
+    OCR1A = 1000; 
+    
+    // Включить выход на OC1A (PB1)
+    TCCR1A |= (1 << COM1A0);
+
+}
 int main(void) {
 
     // 1. САМОЕ ПЕРВОЕ ДЕЛО: запускаем таймер! 
@@ -693,23 +693,28 @@ int main(void) {
 
     /* no pullups on USB and ISP pins */
     PORTD = 0;
-    PORTB = 0;
-    
-    /* Output SE0 for USB reset */
-    PORTB &= ~((1 << PB1) | (1 << PB0)); // D+ и D- = 0
-    DDRB |= (1 << PB1) | (1 << PB0); 	 // выходы, low	
-    
+
+    /* --- USB D+ (PD2) и D- (PD7) --- */
+    PORTD &= ~((1 << PD2) | (1 << PD7)); // D+ и D- = 0
+    DDRD  |= (1 << PD2) | (1 << PD7);    // выходы, low
+
     // Ждем 63 мс (200 * 320us = 64 мс)
-    clockWait(200);           
-    DDRB = 0;                // возвращаем во входы
+    clockWait(200);                        // ?10 мс (USB 2.0 spec)
+
+    DDRD  &= ~((1 << PD2) | (1 << PD7)); // возвращаем во входы
+
+    // Теперь настраиваем порт B: все входы, кроме PB1
+    DDRB = 0;   // все пины порта B как входы
+    DDRB |= (1 << PB1);   // PB1 как выход
 
     /* Инициализация порта C: светодиоды и подтяжки для входов */
-    DDRC = (1 << PC0) | (1 << PC1);  
+    DDRC = (1 << PC0) | (1 << PC1);  // Только PC0 и PC1 как выходы
     DDRC &= ~(1 << PC2);
+    // Включим подтяжки для остальных пинов, включая PC2
     PORTC |= (1 << PC2) | (1 << PC3) | (1 << PC4) | (1 << PC5);
-   
-    /* ----------- индикация ----------- */
 
+    /* ----------- индикация ----------- */
+    
     ledRedOn();
     // Ждем 127 мс (2 раза по 200 * 320us = 128 мс)
     clockWait(200);
@@ -721,9 +726,13 @@ int main(void) {
     clockWait(200);
     
     ledGreenOff();
-    ledRedOn();
-   
+
     /* ----------- USB ----------- */
+
+    /* Инициализация генератора частоты */
+    init_frequency_generator();
+
+    /* main event loop */
     usbInit();
 
     sei();
@@ -733,4 +742,3 @@ int main(void) {
     }
     return 0;
 }
-
