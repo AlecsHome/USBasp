@@ -73,7 +73,7 @@ LDFLAGS = -Wl,--gc-sections -Wl,--relax -flto
 
 COMPILE = avr-gcc $(CFLAGS)
 
-OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o usbdrv/oddebug.o isp.o clock.o tpi.o main.o i2c.o microwire.o 
+OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o usbdrv/oddebug.o isp.o clock.o tpi.o main.o i2c.o microwire.o protocol.o
 
 .c.o:
 	$(COMPILE) -c $< -o $@

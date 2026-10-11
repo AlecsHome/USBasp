@@ -32,14 +32,11 @@
 
 extern uint8_t (*ispTransmit)(uint8_t);
 
+/* Transfer protocol state: prog_state/prog_sck live in main.c, the
+ * addressing/paging counters in protocol.c (see protocol.h). */
 extern uint8_t  prog_state;
-extern uint16_t prog_pagecounter;
-extern uint16_t prog_nbytes;
 extern uint8_t  prog_sck;
 extern uint8_t  user_speed_requested;
-extern volatile uint8_t prog_address_newmode;
-extern uint8_t  prog_address_high;
-extern uint16_t prog_pagesize;
 
 /* Prepare connection to target device */
 void ispConnect(void);
@@ -64,6 +61,12 @@ uint8_t ispEnterProgrammingMode(void);
 uint8_t ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode);
 
 uint8_t ispFlushPage(uint32_t address);
+
+/* 16-bit fast paths (<=64K chips): take a plain uint16_t running address,
+ * so the hot loops in main.c never widen it to 32 bits. */
+uint8_t ispReadFlash16(uint16_t address);
+uint8_t ispWriteFlash16(uint16_t address, uint8_t data, uint8_t pollmode);
+uint8_t ispFlushPage16(uint16_t address);
 
 /* read byte from flash at given address */
 uint8_t ispReadFlash(uint32_t address);
