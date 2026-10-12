@@ -15,6 +15,10 @@
 #ifndef __isp_h_included__
 #define	__isp_h_included__
 
+#ifndef uchar
+#define	uchar	unsigned char
+#endif
+
 #define	ISP_OUT   PORTB
 #define ISP_IN    PINB
 #define ISP_DDR   DDRB
@@ -28,13 +32,12 @@
 
 extern uint8_t (*ispTransmit)(uint8_t);
 
-//extern uint16_t prog_pagesize;
 extern uint8_t  prog_state;
 extern uint16_t prog_pagecounter;
 extern uint16_t prog_nbytes;
 extern uint8_t  prog_sck;
 extern uint8_t  user_speed_requested;
-extern uint8_t prog_address_newmode;
+extern uint8_t  prog_address_newmode;
 extern uint8_t  prog_address_high;
 extern uint16_t prog_pagesize;
 
@@ -57,9 +60,6 @@ uint8_t ispTransmit_hw(uint8_t send_byte);
 /* enter programming mode */
 uint8_t ispEnterProgrammingMode(void);
 
-/* read byte from eeprom at given address */
-uint8_t ispReadEEPROM(uint16_t address);
-
 /* write byte to flash at given address */
 uint8_t ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode);
 
@@ -68,13 +68,14 @@ uint8_t ispFlushPage(uint32_t address);
 /* read byte from flash at given address */
 uint8_t ispReadFlash(uint32_t address);
 
+/* read byte from eeprom at given address */
+uint8_t ispReadEEPROM(uint16_t address);
+
 /* write byte to eeprom at given address */
 uint8_t ispWriteEEPROM(uint16_t address, uint8_t data);
 
 /* set SCK speed. call before ispConnect! */
 void ispSetSCKOption(uint8_t option);
-
-void spibusy(void);
 
 void ispUpdateExtended(uint8_t ext_addr);
 

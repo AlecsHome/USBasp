@@ -21,7 +21,7 @@
 // Автоматический расчет тиков для 320 мкс при предделителе 64
 // Для 16 МГц: (16000000 / 64) * 0.000320 = 80
 // Для 12 МГц: (12000000 / 64) * 0.000320 = 60
-#define CLOCK_T_320us	((F_CPU / 64) * 320 / 1000000)
+#define CLOCK_T_320us ((uint8_t)((F_CPU / 64UL) * 320UL / 1000000UL))
 
 // Универсальное имя для регистра управления таймером
 #if defined(__AVR_ATmega8__) || defined(__AVR_ATmega8A__) || defined(__AVR_ATmega48__) || defined(__AVR_ATmega88__) || defined(__AVR_ATmega168__)

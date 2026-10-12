@@ -78,19 +78,23 @@ static const uint8_t isp_retry_speeds[] PROGMEM = {
 #define ISP_SPEED_CNT (sizeof(isp_retry_speeds) / sizeof(isp_retry_speeds[0]))
 #define GET_SPEED(idx) pgm_read_byte(&isp_retry_speeds[(idx)])
 
+/* Switch off the hardware SPI unit and clear its pending interrupt flag. */
+static inline void spiHWdisable(void) {
+    SPCR &= ~((1 << SPE) | (1 << MSTR));
+    (void)SPSR;  /* reading SPSR ... */
+    (void)SPDR;  /* ... then SPDR resets the SPIF flag */
+}
 
 /* ------------------------------------------------------------------ */
 /* Speed configuration                                                 */
 /* ------------------------------------------------------------------ */
 
 void ispSetSCKOption(uint8_t option) {
-    /* resolve AUTO: reuse the last speed that worked, else start fast */
     if (option == USBASP_ISP_SCK_AUTO) {
         option = (last_success_speed != USBASP_ISP_SCK_AUTO &&
                   last_success_speed != 0) ? last_success_speed : USBASP_ISP_SCK_3000;
     }
-
-    /* range check: only options 1..13 are valid */
+    
     if (option < USBASP_ISP_SCK_0_5 || option > USBASP_ISP_SCK_3000) {
         option = USBASP_ISP_SCK_3000;
     }
@@ -102,22 +106,19 @@ void ispSetSCKOption(uint8_t option) {
         ispTransmit = ispTransmit_hw;
         sck_sw_delay = 0;
 
-        uint8_t idx = USBASP_ISP_SCK_3000 - option;
-
+        uint8_t idx = USBASP_ISP_SCK_3000 - option; /* 0..5 */
+        
         SPCR = SPI_BASE | pgm_read_byte(&hw_spcr_table[idx]);
-
-        /* read-modify-write: clear SPI2X while leaving SPIF/WCOL untouched */
         SPSR = (SPSR & ~(1 << SPI2X)) | pgm_read_byte(&hw_spsr_table[idx]);
-
-        /* clear a possibly pending SPIF flag */
+        
         (void)SPSR;
         (void)SPDR;
     } else {
         /* software SPI (options 1..7) */
         ispTransmit = ispTransmit_sw;
-        SPCR = 0;   /* make sure the HW unit releases SCK/MOSI/MISO */
-
-        uint8_t idx = USBASP_ISP_SCK_32 - option;   /* always 0..6 here */
+        SPCR = 0;
+        
+        uint8_t idx = USBASP_ISP_SCK_93_75 - option; /* ИСПРАВЛЕНО: 8 - option (0..7) */
         sck_sw_delay = pgm_read_byte(&sw_delay_table[idx]);
     }
 }
@@ -125,7 +126,7 @@ void ispSetSCKOption(uint8_t option) {
 /* Wait one SCK half period (software SPI bit timing). */
 void ispDelay(void) {
     uint8_t starttime = TIMERVALUE;
-    while ((uint8_t)(TIMERVALUE - starttime) < sck_sw_delay) {
+    while ((uint8_t)(TIMERVALUE - starttime) <= sck_sw_delay) {
     }
 }
 
@@ -139,7 +140,7 @@ static inline void ispInitPins(void) {
     isp_hiaddr = 0xFF;
 }
 
-static void ispResetState(void) {
+void ispResetState(void) {
     prog_address_newmode = 0;
     prog_address_high    = 0;
     prog_pagesize        = 0;
@@ -150,6 +151,7 @@ void ispConnect(void) {
     ispInitPins();
     ispResetState();
 
+    /* classic AVR power-on reset sequence: toggle RST with >=100 ms waits */
     ISP_OUT &= ~(1 << ISP_RST);
     ISP_OUT &= ~(1 << ISP_SCK);
     clockWait(1);
@@ -348,7 +350,7 @@ uint8_t ispWriteFlash(uint32_t address, uint8_t data, uint8_t pollmode) {
 
     if (!pollmode) return 0;
 
-    if (data != 0xFF) {
+    if (data != 0xFF && data != 0x7F) {
         for (uint8_t t = 0; t < 20; t++) {
             if (ispReadFlash(address) == data) return 0;
             clockWait(1);
@@ -387,6 +389,12 @@ uint8_t ispWriteEEPROM(uint16_t address, uint8_t data) {
     ispTransmit(ADDR_BYTE(address, 1));
     ispTransmit(ADDR_BYTE(address, 0));
     ispTransmit(data);
+
+    // Если пишем 0xFF, поллинг невозможен (читается 0xFF во время записи).
+    if (data == 0xFF) {
+        clockWait(15); // 4.8 мс
+        return 0;
+    }
 
     for (uint8_t t = 32; t; --t) {
         clockWait(1);

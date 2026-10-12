@@ -8,6 +8,7 @@
  * Creation Date..: 2005-02-20
  * Last change....: 2009-02-28
  *
+ * PC2 SCK speed option.
  * GND  -> slow (8khz SCK),
  * open -> software set speed (default is 375kHz SCK)
  */
@@ -56,6 +57,8 @@ extern uint8_t last_success_speed;
 extern uint8_t isp_hiaddr;
 extern uint8_t tpi_parity_err;
 
+/* Макрос для быстрой проверки минимального значения */
+//#define MIN(a, b) (((a) < (b)) ? (a) : (b))
 // Оптимизированная функция вместо макроса MIN
 static inline uint8_t min_u8_u16(uint8_t a, uint16_t b) {
     return (b < a) ? (uint8_t)b : a;
@@ -77,7 +80,7 @@ static inline void endTransfer(void) {
    * data[6:7] -> wLength: реальный размер полезных данных в ЭТОМ конкретном USB-пакете (макс 255/64 байта). 
 */
 static void setupTransfer(uint8_t *data, uint8_t new_state) {
-    uint8_t *p_addr = (uint8_t *)&prog_address;  // ← УКАЗАТЕЛЬ
+    uint8_t *p_addr = (uint8_t *)&prog_address;
     p_addr[0] = data[2];
     p_addr[1] = data[3];
     
@@ -92,17 +95,23 @@ static void setupTransfer(uint8_t *data, uint8_t new_state) {
     uint16_t wlength = ((uint16_t)data[7] << 8) | data[6];
     prog_nbytes = wlength;
     
-    // Инициализация страничной записи
     if (new_state == PROG_STATE_WRITEFLASH) {
         uint16_t windex = ((uint16_t)data[5] << 8) | data[4];
-        prog_pagesize = windex; // avrdude передает размер страницы в wIndex
         
-        // ЗАЩИТА ОТ КРИВОГО РАЗМЕРА СТРАНИЦЫ
+        // 1. ПРОВЕРКА ФОРМАТА ХОСТА
+        if (windex > 0 && (windex & (windex - 1)) == 0) {
+            prog_pagesize = windex;
+        } 
+        // 2. ФОРМАТ СТАНДАРТНОГО AVRDUDE
+        else {
+            prog_pagesize = data[4] | ((uint16_t)(data[5] & 0xF0) << 4);
+        }
+        
+        // 3. ЗАЩИТА ОТ КРИВОГО РАЗМЕРА СТРАНИЦЫ
         if (prog_pagesize > 0 && (prog_pagesize & (prog_pagesize - 1)) == 0) {
             uint16_t low_addr = ((uint16_t)data[3] << 8) | data[2];
             prog_pagecounter = prog_pagesize - (low_addr & (prog_pagesize - 1));
         } else {
-            // Если размер не степень двойки (например 100) или 0 - безопасный побайтовый режим
             prog_pagesize = 0; 
             prog_pagecounter = 0;
         }
@@ -166,7 +175,7 @@ usbMsgLen_t usbFunctionSetup(uint8_t data[8]) {
         
 
 	if (data[1] == USBASP_FUNC_CONNECT) {
-        	ledRedOn();
+               	ledRedOn();
         	ispConnect();
         	ispSetSCKOption(prog_sck);
 
@@ -258,9 +267,9 @@ usbMsgLen_t usbFunctionSetup(uint8_t data[8]) {
 //spi ----------------------------------------------------------------------------------------
 
 	} else if (data[1] == USBASP_FUNC_SPI_CONNECT) {
-		ispSetSCKOption(prog_sck);
 		ledRedOn();
 		ispSPIConnect();
+		ispSetSCKOption(prog_sck);
 			
 	} else if (data[1] == USBASP_FUNC_SPI_READ) {
     		setupSPIState(PROG_STATE_SPI_READ, data);
@@ -399,13 +408,12 @@ uint8_t usbFunctionRead(uint8_t *data, uint8_t len)
 {
     /* Clamp to the number of bytes still pending in this transfer. */
     len = min_u8_u16(len, prog_nbytes);
- 
+
     /* Guard against zero-length packets. */
     if (len == 0) return 0;
 
     /* Green LED marks an active read transfer (one write per chunk). */
     ledGreenOn();
-
 
     switch (prog_state) {
 
@@ -514,7 +522,7 @@ uint8_t usbFunctionRead(uint8_t *data, uint8_t len)
     }
 
     ledGreenOff();
-    ledRedOn();
+    ledRedOff();
     return len;
 }
 
@@ -535,10 +543,7 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t len)
         /* ---------- TPI write ---------- */
         case PROG_STATE_TPI_WRITE:
             tpi_write_block_c(prog_address, data, len);
-            if (prog_state == PROG_STATE_IDLE) {
-                ledGreenOff(); // Сбрасываем LED перед аварийным выходом
-                return 0xFF;    // Ошибка NVM
-            }
+            if (prog_state == PROG_STATE_IDLE) return 0xFF; // Ошибка NVM
             prog_address += len;
             prog_nbytes  -= len;
             break;
@@ -565,8 +570,7 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t len)
                 if (i2c_send_byte(*src++) == 0) {
                     i2c_stop();
                     endTransfer();
-                    ledGreenOff(); // Сбрасываем LED перед аварийным выходом
-                    return 0xFF;    // STALL при NACK
+                    return 0xFF; // STALL при NACK
                 }
             } while (--count);
 
