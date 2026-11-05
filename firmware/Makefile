@@ -104,7 +104,7 @@ main.hex:	main.bin
 	@avr-size -A main.bin > _size.tmp
 	@awk -v fs=$(FLASH_SIZE) -v rs=$(RAM_SIZE) -v es=$(EEPROM_SIZE) 'BEGIN {f=0; r=0; e=0} /\.text/ {f+=$$2} /\.data/ {f+=$$2; r+=$$2} /\.bss/ {r+=$$2} /\.eeprom/ {e+=$$2} END {fp=f*100/fs; rp=r*100/rs; ep=e*100/es; fc=(fp<70)?"32":(fp<85)?"33":"31"; rc=(rp<70)?"32":(rp<85)?"33":"31"; ec=(ep<70)?"32":(ep<85)?"33":"31"; printf "echo -e \"  Flash:  \\033[0;%dm%5d / %4d bytes (%5.1f%%)\\033[0m\"\n", fc, f, fs, fp; printf "echo -e \"  RAM:    \\033[0;%dm%5d / %4d bytes (%5.1f%%)\\033[0m\"\n", rc, r, rs, rp; printf "echo -e \"  EEPROM: \\033[0;%dm%5d / %4d bytes (%5.1f%%)\\033[0m\"\n", ec, e, es, ep;}' _size.tmp | sh
 	@rm -f _size.tmp
-	@echo "----------------------------------"
+	@echo "-------------------------------------"
 
 disasm:	main.bin
 	avr-objdump -d main.bin

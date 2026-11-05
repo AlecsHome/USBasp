@@ -392,7 +392,7 @@ uint8_t ispWriteEEPROM(uint16_t address, uint8_t data) {
 
     // Если пишем 0xFF, поллинг невозможен (читается 0xFF во время записи).
     if (data == 0xFF) {
-        clockWait(15); // 4.8 мс
+        clockWait(16); 
         return 0;
     }
 
